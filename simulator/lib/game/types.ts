@@ -89,12 +89,20 @@ export interface ReplayPlayerFrame {
   active: boolean;
 }
 
+export interface MatchClock {
+  period: 1 | 2;
+  periodElapsed: number;
+  regulationPeriodDuration: number;
+}
+
 export interface ReplayFrame {
   t: number;
+  clock: MatchClock;
   ball: {
     x: number;
     y: number;
     ownerId: string | null;
+    dead: boolean;
   };
   players: ReplayPlayerFrame[];
 }
@@ -102,6 +110,7 @@ export interface ReplayFrame {
 export type MatchEventType =
   | "KICKOFF"
   | "HALF_TIME"
+  | "ADDED_TIME"
   | "FULL_TIME"
   | "PASS"
   | "INTERCEPTION"
@@ -116,7 +125,12 @@ export type MatchEventType =
   | "YELLOW_CARD"
   | "RED_CARD"
   | "INJURY"
-  | "SUBSTITUTION";
+  | "SUBSTITUTION"
+  | "THROW_IN"
+  | "CORNER"
+  | "GOAL_KICK"
+  | "FREE_KICK"
+  | "PENALTY";
 
 export interface MatchEvent {
   t: number;
@@ -125,6 +139,7 @@ export interface MatchEvent {
   playerId?: number;
   runtimeId?: string;
   message: string;
+  clockLabel?: string;
 }
 
 export interface TeamMatchStats {
@@ -143,6 +158,13 @@ export interface TeamMatchStats {
   redCards: number;
   offsides: number;
   substitutions: number;
+  throwIns: number;
+  corners: number;
+  goalKicks: number;
+  freeKicks: number;
+  penalties: number;
+  goalkeeperSaves: number;
+  goalsFromSetPieces: number;
   possession: number;
   averageStarterEnergy: number;
 }
@@ -175,7 +197,12 @@ export interface MatchReplay {
   engineVersion: string;
   seed: string;
   logicalDuration: number;
+  regulationLogicalDuration: number;
   displayedMinutes: number;
+  addedTime: {
+    firstHalfMinutes: number;
+    secondHalfMinutes: number;
+  };
   frameInterval: number;
   homeName: string;
   awayName: string;

@@ -167,9 +167,17 @@ export function AnalyticsDashboard() {
                 <MetricRow label="Réussite des passes" home={`${data.baseline.averageHomePassCompletion}%`} away={`${data.baseline.averageAwayPassCompletion}%`} />
                 <MetricRow label="Conversion des tirs" home={`${data.baseline.averageHomeShotConversion}%`} away={`${data.baseline.averageAwayShotConversion}%`} />
                 <MetricRow label="Hors-jeu" home={data.baseline.averageHomeOffsides} away={data.baseline.averageAwayOffsides} />
+                <MetricRow label="Touches" home={data.baseline.averageHomeThrowIns} away={data.baseline.averageAwayThrowIns} />
+                <MetricRow label="Corners" home={data.baseline.averageHomeCorners} away={data.baseline.averageAwayCorners} />
+                <MetricRow label="Six mètres" home={data.baseline.averageHomeGoalKicks} away={data.baseline.averageAwayGoalKicks} />
+                <MetricRow label="Coups francs" home={data.baseline.averageHomeFreeKicks} away={data.baseline.averageAwayFreeKicks} />
+                <MetricRow label="Penalties" home={data.baseline.averageHomePenalties} away={data.baseline.averageAwayPenalties} />
+                <MetricRow label="Arrêts gardien" home={data.baseline.averageHomeGoalkeeperSaves} away={data.baseline.averageAwayGoalkeeperSaves} />
                 <MetricRow label="Changements" home={data.baseline.averageHomeSubstitutions} away={data.baseline.averageAwaySubstitutions} />
                 <MetricRow label="Possession" home={`${data.baseline.averageHomePossession}%`} away={`${data.baseline.averageAwayPossession}%`} />
                 <MetricRow label="Énergie moyenne finale des titulaires" home={`${data.baseline.averageHomeStarterEnergy}%`} away={`${data.baseline.averageAwayStarterEnergy}%`} />
+                <MetricRow label="Temps additionnel moyen 1re mi-temps" home={`${data.baseline.averageFirstHalfAddedTime} min`} away="—" />
+                <MetricRow label="Temps additionnel moyen 2e mi-temps" home={`${data.baseline.averageSecondHalfAddedTime} min`} away="—" />
               </tbody>
             </table>
           </section>
@@ -352,7 +360,8 @@ function SensitivityBar({ item, max }: { item: SensitivityResult; max: number })
         <strong>{item.stat}</strong>
         <span>
           Δ buts {formatSigned(item.averageGoalDifferenceDelta)} · Δ win rate{" "}
-          {formatSigned(item.homeWinRateDelta)} pts
+          {formatSigned(item.homeWinRateDelta)} pts · {item.secondaryMetricLabel}{" "}
+          {formatSigned(item.secondaryMetricDelta)}
         </span>
       </div>
       <div className="sensitivity-track">

@@ -44,6 +44,20 @@ export interface MonteCarloAggregate {
   averageAwayOffsides: number;
   averageHomeSubstitutions: number;
   averageAwaySubstitutions: number;
+  averageHomeThrowIns: number;
+  averageAwayThrowIns: number;
+  averageHomeCorners: number;
+  averageAwayCorners: number;
+  averageHomeGoalKicks: number;
+  averageAwayGoalKicks: number;
+  averageHomeFreeKicks: number;
+  averageAwayFreeKicks: number;
+  averageHomePenalties: number;
+  averageAwayPenalties: number;
+  averageHomeGoalkeeperSaves: number;
+  averageAwayGoalkeeperSaves: number;
+  averageFirstHalfAddedTime: number;
+  averageSecondHalfAddedTime: number;
   averageHomePossession: number;
   averageAwayPossession: number;
   averageHomeStarterEnergy: number;
@@ -78,6 +92,8 @@ export interface SensitivityResult {
   boost: number;
   averageGoalDifferenceDelta: number;
   homeWinRateDelta: number;
+  secondaryMetricLabel: string;
+  secondaryMetricDelta: number;
 }
 
 export interface RoleExperimentResult {

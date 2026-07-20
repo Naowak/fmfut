@@ -1,11 +1,5 @@
 # FUT Manager — Next.js 2D Match Simulator
 
-## Version actuelle : V0.4
-
-La V0.4 ajoute un bloc de formation dynamique, un hors-jeu simplifié, des rotations automatiques, une célébration/pause sur les buts, un terrain redimensionnable et un Balance Lab enrichi avec heatmaps et métriques spatiales.
-
-Consulter `CHANGELOG_V0.4.md` pour le détail des changements.
-
 Prototype de moteur de match pour le projet FUT Manager.
 
 Version moteur : **0.2.0**.
@@ -537,3 +531,23 @@ Le viewer pivote le repère du moteur sans modifier la simulation : l'équipe `H
 Les couleurs des équipes sont configurables dans le viewer parmi huit choix. Le réglage par défaut est bleu pour l'équipe du joueur et rouge pour l'adversaire.
 
 Le Balance Lab expose maintenant l'énergie moyenne finale des titulaires pour suivre le calibrage de la fatigue.
+
+---
+
+## V0.5 — règles physiques et coups de pied arrêtés
+
+La V0.5 fait évoluer le moteur vers une simulation où les événements sont déclenchés par la position réelle du ballon :
+
+- contrôle uniquement au contact réel de la balle ;
+- tirs sans résultat pré-calculé ;
+- but uniquement lorsque le ballon franchit réellement la ligne entre les poteaux ;
+- gardien obligé d'atteindre physiquement la trajectoire ;
+- touches, corners et six mètres ;
+- coups francs avec mur sur les positions dangereuses ;
+- penalties ;
+- repositionnement complet lors des arrêts de jeu ;
+- pauses visuelles des événements, y compris en ×4 ;
+- temps additionnel par mi-temps ;
+- nouvelles métriques Monte-Carlo sur les coups de pied arrêtés et le temps additionnel.
+
+Voir `CHANGELOG_V0.5.md` pour les détails.

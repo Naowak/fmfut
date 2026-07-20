@@ -36,6 +36,8 @@ type MatchSummary = {
   awayScore: number;
   home: TeamMatchStats;
   away: TeamMatchStats;
+  firstHalfAddedTime: number;
+  secondHalfAddedTime: number;
   spatial?: MatchSpatialAnalytics;
 };
 
@@ -97,7 +99,8 @@ export async function POST(request: Request) {
         "La baseline enregistre un échantillon spatial par seconde logique pour les heatmaps et les métriques de bloc.",
         "Les expériences de sensibilité utilisent exactement les mêmes seeds que la baseline.",
         "Le boost de +10 est appliqué à la stat testée sur le onze titulaire domicile uniquement.",
-        "La V0.4 mesure les hors-jeu, les remplacements, le centre/largeur/profondeur du bloc et sa différence avec/sans possession.",
+        "La V0.5 mesure aussi touches, corners, six mètres, coups francs, penalties, arrêts gardien et temps additionnel moyen.",
+        "Un but n'est plus tiré probabilistiquement : il faut que la balle traverse physiquement la ligne entre les poteaux.",
         "Les heatmaps sont exprimées dans le repère de chaque équipe : notre but en bas, but adverse en haut.",
         "Le moteur ne possède encore qu'une formation 4-3-3 : la comparaison de formations sera ajoutée quand plusieurs formations existeront.",
       ],
@@ -145,6 +148,8 @@ function runBatch(params: {
       awayScore: result.result.awayScore,
       home: result.stats.home,
       away: result.stats.away,
+      firstHalfAddedTime: result.replay.addedTime.firstHalfMinutes,
+      secondHalfAddedTime: result.replay.addedTime.secondHalfMinutes,
       spatial: result.analytics,
     });
   }
@@ -217,6 +222,12 @@ function runSensitivityExperiment(params: {
     boostedAggregate.averageHomeGoals -
     boostedAggregate.averageAwayGoals;
 
+  const secondary = sensitivitySecondaryMetric(
+    params.stat,
+    baselineAggregate,
+    boostedAggregate,
+  );
+
   return {
     stat: params.stat,
     boost: params.boost,
@@ -228,7 +239,48 @@ function runSensitivityExperiment(params: {
       boostedAggregate.homeWinRate - baselineAggregate.homeWinRate,
       2,
     ),
+    secondaryMetricLabel: secondary.label,
+    secondaryMetricDelta: round(secondary.delta, 2),
   };
+}
+
+function sensitivitySecondaryMetric(
+  stat: AnalyzedStat,
+  baseline: MonteCarloAggregate,
+  boosted: MonteCarloAggregate,
+): { label: string; delta: number } {
+  switch (stat) {
+    case "passing":
+      return {
+        label: "réussite passes",
+        delta: boosted.averageHomePassCompletion - baseline.averageHomePassCompletion,
+      };
+    case "shooting":
+      return {
+        label: "conversion tirs",
+        delta: boosted.averageHomeShotConversion - baseline.averageHomeShotConversion,
+      };
+    case "speed":
+      return {
+        label: "tirs transition / match",
+        delta: boosted.averageHomeTransitionShots - baseline.averageHomeTransitionShots,
+      };
+    case "physical":
+      return {
+        label: "duels gagnés / match",
+        delta: boosted.averageHomeDuelsWon - baseline.averageHomeDuelsWon,
+      };
+    case "technique":
+      return {
+        label: "réussite passes",
+        delta: boosted.averageHomePassCompletion - baseline.averageHomePassCompletion,
+      };
+    case "intelligence":
+      return {
+        label: "hors-jeu évités / match",
+        delta: baseline.averageHomeOffsides - boosted.averageHomeOffsides,
+      };
+  }
 }
 
 function runRoleExperiment(params: {
@@ -309,6 +361,20 @@ function aggregate(matches: MatchSummary[]): MonteCarloAggregate {
     awayOffsides: 0,
     homeSubstitutions: 0,
     awaySubstitutions: 0,
+    homeThrowIns: 0,
+    awayThrowIns: 0,
+    homeCorners: 0,
+    awayCorners: 0,
+    homeGoalKicks: 0,
+    awayGoalKicks: 0,
+    homeFreeKicks: 0,
+    awayFreeKicks: 0,
+    homePenalties: 0,
+    awayPenalties: 0,
+    homeGoalkeeperSaves: 0,
+    awayGoalkeeperSaves: 0,
+    firstHalfAddedTime: 0,
+    secondHalfAddedTime: 0,
     homePossession: 0,
     awayPossession: 0,
     homeStarterEnergy: 0,
@@ -342,6 +408,20 @@ function aggregate(matches: MatchSummary[]): MonteCarloAggregate {
     totals.awayOffsides += match.away.offsides;
     totals.homeSubstitutions += match.home.substitutions;
     totals.awaySubstitutions += match.away.substitutions;
+    totals.homeThrowIns += match.home.throwIns;
+    totals.awayThrowIns += match.away.throwIns;
+    totals.homeCorners += match.home.corners;
+    totals.awayCorners += match.away.corners;
+    totals.homeGoalKicks += match.home.goalKicks;
+    totals.awayGoalKicks += match.away.goalKicks;
+    totals.homeFreeKicks += match.home.freeKicks;
+    totals.awayFreeKicks += match.away.freeKicks;
+    totals.homePenalties += match.home.penalties;
+    totals.awayPenalties += match.away.penalties;
+    totals.homeGoalkeeperSaves += match.home.goalkeeperSaves;
+    totals.awayGoalkeeperSaves += match.away.goalkeeperSaves;
+    totals.firstHalfAddedTime += match.firstHalfAddedTime;
+    totals.secondHalfAddedTime += match.secondHalfAddedTime;
     totals.homePossession += match.home.possession;
     totals.awayPossession += match.away.possession;
     totals.homeStarterEnergy += match.home.averageStarterEnergy;
@@ -393,6 +473,20 @@ function aggregate(matches: MatchSummary[]): MonteCarloAggregate {
     averageAwayOffsides: average(totals.awayOffsides, count),
     averageHomeSubstitutions: average(totals.homeSubstitutions, count),
     averageAwaySubstitutions: average(totals.awaySubstitutions, count),
+    averageHomeThrowIns: average(totals.homeThrowIns, count),
+    averageAwayThrowIns: average(totals.awayThrowIns, count),
+    averageHomeCorners: average(totals.homeCorners, count),
+    averageAwayCorners: average(totals.awayCorners, count),
+    averageHomeGoalKicks: average(totals.homeGoalKicks, count),
+    averageAwayGoalKicks: average(totals.awayGoalKicks, count),
+    averageHomeFreeKicks: average(totals.homeFreeKicks, count),
+    averageAwayFreeKicks: average(totals.awayFreeKicks, count),
+    averageHomePenalties: average(totals.homePenalties, count),
+    averageAwayPenalties: average(totals.awayPenalties, count),
+    averageHomeGoalkeeperSaves: average(totals.homeGoalkeeperSaves, count),
+    averageAwayGoalkeeperSaves: average(totals.awayGoalkeeperSaves, count),
+    averageFirstHalfAddedTime: average(totals.firstHalfAddedTime, count),
+    averageSecondHalfAddedTime: average(totals.secondHalfAddedTime, count),
     averageHomePossession: average(totals.homePossession, count),
     averageAwayPossession: average(totals.awayPossession, count),
     averageHomeStarterEnergy: average(totals.homeStarterEnergy, count),

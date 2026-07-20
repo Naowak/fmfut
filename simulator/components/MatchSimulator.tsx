@@ -198,6 +198,12 @@ export function MatchSimulator() {
                 <StatRow label="Tirs en transition" home={match.stats.home.transitionShots} away={match.stats.away.transitionShots} />
                 <StatRow label="Récupérations" home={match.stats.home.possessionRegains} away={match.stats.away.possessionRegains} />
                 <StatRow label="Hors-jeu" home={match.stats.home.offsides} away={match.stats.away.offsides} />
+                <StatRow label="Touches" home={match.stats.home.throwIns} away={match.stats.away.throwIns} />
+                <StatRow label="Corners" home={match.stats.home.corners} away={match.stats.away.corners} />
+                <StatRow label="Six mètres" home={match.stats.home.goalKicks} away={match.stats.away.goalKicks} />
+                <StatRow label="Coups francs" home={match.stats.home.freeKicks} away={match.stats.away.freeKicks} />
+                <StatRow label="Penalties" home={match.stats.home.penalties} away={match.stats.away.penalties} />
+                <StatRow label="Arrêts gardien" home={match.stats.home.goalkeeperSaves} away={match.stats.away.goalkeeperSaves} />
                 <StatRow label="Changements" home={match.stats.home.substitutions} away={match.stats.away.substitutions} />
                 <StatRow label="Tacles" home={match.stats.home.tackles} away={match.stats.away.tackles} />
                 <StatRow label="Fautes" home={match.stats.home.fouls} away={match.stats.away.fouls} />

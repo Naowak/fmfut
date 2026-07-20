@@ -23,11 +23,11 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationRef = useRef<number | null>(null);
   const lastTimestampRef = useRef<number | null>(null);
-  const goalPauseUntilRef = useRef(0);
-  const handledGoalsRef = useRef(new Set<string>());
+  const eventPauseUntilRef = useRef(0);
+  const handledPauseEventsRef = useRef(new Set<string>());
 
   const [time, setTime] = useState(0);
-  const [goalCelebration, setGoalCelebration] = useState<MatchEvent | null>(null);
+  const [eventOverlay, setEventOverlay] = useState<MatchEvent | null>(null);
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState<1 | 2 | 4>(1);
 
@@ -39,9 +39,9 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
   useEffect(() => {
     setTime(0);
     setPlaying(true);
-    setGoalCelebration(null);
-    goalPauseUntilRef.current = 0;
-    handledGoalsRef.current.clear();
+    setEventOverlay(null);
+    eventPauseUntilRef.current = 0;
+    handledPauseEventsRef.current.clear();
     lastTimestampRef.current = null;
   }, [replay]);
 
@@ -54,13 +54,13 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
       const deltaSeconds = (timestamp - lastTimestampRef.current) / 1000;
       lastTimestampRef.current = timestamp;
 
-      if (goalPauseUntilRef.current > 0) {
-        if (timestamp < goalPauseUntilRef.current) {
+      if (eventPauseUntilRef.current > 0) {
+        if (timestamp < eventPauseUntilRef.current) {
           animationRef.current = requestAnimationFrame(tick);
           return;
         }
-        goalPauseUntilRef.current = 0;
-        setGoalCelebration(null);
+        eventPauseUntilRef.current = 0;
+        setEventOverlay(null);
       }
 
       if (playing) {
@@ -70,22 +70,23 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
             previous + deltaSeconds * speed,
           );
 
-          const crossedGoal = replay.events.find((event) => {
-            if (event.type !== "GOAL") return false;
-            const key = `${event.t}-${event.runtimeId ?? event.playerId ?? "goal"}`;
+          const crossedEvent = replay.events.find((event) => {
+            const pauseMs = pauseDurationForEvent(event);
+            if (pauseMs <= 0) return false;
+            const key = `${event.t}-${event.type}-${event.runtimeId ?? event.playerId ?? event.message}`;
             return (
               event.t > previous + 1e-6 &&
               event.t <= next + 1e-6 &&
-              !handledGoalsRef.current.has(key)
+              !handledPauseEventsRef.current.has(key)
             );
           });
 
-          if (crossedGoal) {
-            const key = `${crossedGoal.t}-${crossedGoal.runtimeId ?? crossedGoal.playerId ?? "goal"}`;
-            handledGoalsRef.current.add(key);
-            setGoalCelebration(crossedGoal);
-            goalPauseUntilRef.current = timestamp + 2600;
-            return crossedGoal.t;
+          if (crossedEvent) {
+            const key = `${crossedEvent.t}-${crossedEvent.type}-${crossedEvent.runtimeId ?? crossedEvent.playerId ?? crossedEvent.message}`;
+            handledPauseEventsRef.current.add(key);
+            setEventOverlay(crossedEvent);
+            eventPauseUntilRef.current = timestamp + pauseDurationForEvent(crossedEvent);
+            return crossedEvent.t;
           }
 
           if (next >= replay.logicalDuration) {
@@ -161,10 +162,7 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
     drawScene(ctx, canvas, snapshot, metadata, homeColor, awayColor);
   }, [awayColor, homeColor, metadata, snapshot]);
 
-  const displayedMinute = Math.min(
-    replay.displayedMinutes,
-    (time / replay.logicalDuration) * replay.displayedMinutes,
-  );
+  const clockLabel = snapshot ? formatMatchClock(snapshot) : "0:00";
 
   return (
     <div className="match-view-grid">
@@ -178,7 +176,7 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
             {liveScore.home} - {liveScore.away}
           </span>
           <span className="score-team">{replay.awayName}</span>
-          <span className="scoreboard-clock">{formatDisplayedMinute(displayedMinute)}</span>
+          <span className="scoreboard-clock">{clockLabel}</span>
         </div>
 
         <div
@@ -192,15 +190,20 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
             className="pitch-canvas pitch-canvas-vertical"
           />
 
-          {goalCelebration && (
+          {eventOverlay && (
             <div
               className="goal-celebration"
               style={{
-                borderColor: goalCelebration.team === "HOME" ? homeColor : awayColor,
+                borderColor:
+                  eventOverlay.team === "HOME"
+                    ? homeColor
+                    : eventOverlay.team === "AWAY"
+                      ? awayColor
+                      : "#ffffff",
               }}
             >
-              <strong>BUT !</strong>
-              <span>{goalCelebration.message}</span>
+              <strong>{eventTitle(eventOverlay)}</strong>
+              <span>{eventOverlay.message}</span>
             </div>
           )}
 
@@ -228,9 +231,9 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
               if (time >= replay.logicalDuration) {
                 setTime(0);
                 setPlaying(true);
-                setGoalCelebration(null);
-                goalPauseUntilRef.current = 0;
-                handledGoalsRef.current.clear();
+                setEventOverlay(null);
+                eventPauseUntilRef.current = 0;
+                handledPauseEventsRef.current.clear();
                 return;
               }
               setPlaying((value) => !value);
@@ -266,8 +269,8 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
             onChange={(event) => {
               setTime(Number(event.target.value));
               setPlaying(false);
-              setGoalCelebration(null);
-              goalPauseUntilRef.current = 0;
+              setEventOverlay(null);
+              eventPauseUntilRef.current = 0;
             }}
             aria-label="Position dans le replay"
           />
@@ -290,7 +293,7 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
             <h2>Fil du match</h2>
           </div>
           <span className="commentary-minute">
-            {Math.floor(displayedMinute)}&apos;
+            {clockLabel}
           </span>
         </div>
 
@@ -302,8 +305,6 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
               <EventLine
                 key={`${event.t}-${event.type}-${index}`}
                 event={event}
-                logicalDuration={replay.logicalDuration}
-                displayedMinutes={replay.displayedMinutes}
               />
             ))
           )}
@@ -338,20 +339,10 @@ function SubstitutionToast({
   );
 }
 
-function EventLine({
-  event,
-  logicalDuration,
-  displayedMinutes,
-}: {
-  event: MatchEvent;
-  logicalDuration: number;
-  displayedMinutes: number;
-}) {
-  const minute = Math.floor((event.t / logicalDuration) * displayedMinutes);
-
+function EventLine({ event }: { event: MatchEvent }) {
   return (
     <div className="event-item">
-      <span className="event-minute">{minute}&apos;</span>
+      <span className="event-minute">{event.clockLabel ?? "—"}</span>
       {event.message}
     </div>
   );
@@ -364,6 +355,12 @@ function isInterestingEvent(event: MatchEvent): boolean {
     "SAVE",
     "MISS",
     "OFFSIDE",
+    "THROW_IN",
+    "CORNER",
+    "GOAL_KICK",
+    "FREE_KICK",
+    "PENALTY",
+    "ADDED_TIME",
     "YELLOW_CARD",
     "RED_CARD",
     "INJURY",
@@ -405,12 +402,23 @@ function interpolateReplay(frames: ReplayFrame[], time: number): ReplayFrame | n
     };
   });
 
+  const samePeriod = previous.clock.period === next.clock.period;
   return {
     t: time,
+    clock: samePeriod
+      ? {
+          period: previous.clock.period,
+          periodElapsed: lerp(previous.clock.periodElapsed, next.clock.periodElapsed, alpha),
+          regulationPeriodDuration: previous.clock.regulationPeriodDuration,
+        }
+      : alpha < 0.5
+        ? previous.clock
+        : next.clock,
     ball: {
       x: lerp(previous.ball.x, next.ball.x, alpha),
       y: lerp(previous.ball.y, next.ball.y, alpha),
       ownerId: alpha < 0.5 ? previous.ball.ownerId : next.ball.ownerId,
+      dead: alpha < 0.5 ? previous.ball.dead : next.ball.dead,
     },
     players,
   };
@@ -596,10 +604,60 @@ function contrastText(hex: string): string {
   return luminance > 0.62 ? "#111111" : "#ffffff";
 }
 
-function formatDisplayedMinute(minute: number): string {
-  const whole = Math.floor(minute);
-  const seconds = Math.floor((minute - whole) * 60);
-  return `${String(whole).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+function formatMatchClock(frame: ReplayFrame): string {
+  const { period, periodElapsed, regulationPeriodDuration } = frame.clock;
+  const baseMinute = period === 1 ? 0 : 45;
+  if (periodElapsed <= regulationPeriodDuration) {
+    const seconds =
+      baseMinute * 60 +
+      (periodElapsed / regulationPeriodDuration) * 45 * 60;
+    const minute = Math.floor(seconds / 60);
+    const second = Math.floor(seconds % 60);
+    return `${minute}:${String(second).padStart(2, "0")}`;
+  }
+  const addedSeconds =
+    ((periodElapsed - regulationPeriodDuration) / regulationPeriodDuration) *
+    45 *
+    60;
+  return `${period === 1 ? 45 : 90}+${Math.floor(addedSeconds / 60) + 1}`;
+}
+
+function pauseDurationForEvent(event: MatchEvent): number {
+  switch (event.type) {
+    case "GOAL": return 2800;
+    case "PENALTY": return 2400;
+    case "HALF_TIME": return 2200;
+    case "CORNER":
+    case "FREE_KICK": return 1700;
+    case "INJURY": return 1900;
+    case "RED_CARD": return 1700;
+    case "YELLOW_CARD": return 1200;
+    case "SUBSTITUTION": return 1400;
+    case "THROW_IN":
+    case "GOAL_KICK":
+    case "OFFSIDE": return 1200;
+    case "ADDED_TIME": return 1000;
+    default: return 0;
+  }
+}
+
+function eventTitle(event: MatchEvent): string {
+  switch (event.type) {
+    case "GOAL": return "BUT !";
+    case "PENALTY": return "PENALTY";
+    case "CORNER": return "CORNER";
+    case "FREE_KICK": return "COUP FRANC";
+    case "THROW_IN": return "TOUCHE";
+    case "GOAL_KICK": return "SIX MÈTRES";
+    case "OFFSIDE": return "HORS-JEU";
+    case "SUBSTITUTION": return "CHANGEMENT";
+    case "INJURY": return "BLESSURE";
+    case "RED_CARD": return "CARTON ROUGE";
+    case "YELLOW_CARD": return "CARTON JAUNE";
+    case "HALF_TIME": return "MI-TEMPS";
+    case "ADDED_TIME": return "TEMPS ADDITIONNEL";
+    default: return event.type.replaceAll("_", " ");
+  }
 }
 
 function lerp(a: number, b: number, t: number): number {

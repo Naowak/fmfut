@@ -67,6 +67,8 @@ type ControlledBall = {
   mode: "CONTROLLED";
   ownerId: string;
   pos: Vec2;
+  controlOffset?: Vec2;
+  controlAt?: number;
 };
 
 type TransitBall = {
@@ -90,15 +92,42 @@ type LooseBall = {
   mode: "LOOSE";
   pos: Vec2;
   age: number;
-  velocity?: Vec2;
-  deceleration?: number;
+  velocity: Vec2;
+  deceleration: number;
   sourceTeamIndex?: TeamIndex;
   actorId?: string;
   intendedReceiverId?: string;
-  kind?: "PASS" | "REBOUND" | "DEFLECTION";
+  kind?: "PASS" | "SHOT" | "REBOUND" | "DEFLECTION" | "SET_PIECE";
+  lastTouchTeamIndex?: TeamIndex;
+  lastTouchPlayerId?: string;
+  setPieceOrigin?: RestartType;
 };
 
-type RuntimeBall = ControlledBall | TransitBall | LooseBall;
+type DeadBall = {
+  mode: "DEAD";
+  pos: Vec2;
+};
+
+type RuntimeBall = ControlledBall | TransitBall | LooseBall | DeadBall;
+
+type RestartType =
+  | "KICKOFF"
+  | "THROW_IN"
+  | "CORNER"
+  | "GOAL_KICK"
+  | "FREE_KICK"
+  | "PENALTY";
+
+type RestartState = {
+  type: RestartType;
+  teamIndex: TeamIndex;
+  spot: Vec2;
+  takerId: string;
+  resumeAt: number;
+  directShotPreferred: boolean;
+  wallPlayerIds: string[];
+  countsForAddedTime: boolean;
+};
 
 type SpatialTeamAccumulator = {
   samples: number;
@@ -129,6 +158,16 @@ type SpatialAccumulator = {
 type MatchState = {
   t: number;
   logicalDuration: number;
+  regulationLogicalDuration: number;
+  period: 1 | 2;
+  periodElapsed: number;
+  periodRegulationDuration: number;
+  periodAddedTarget: number;
+  firstHalfAddedLogical: number;
+  secondHalfAddedLogical: number;
+  addedTimeAnnounced: boolean;
+  matchEnded: boolean;
+  restart: RestartState | null;
   teams: [RuntimeTeam, RuntimeTeam];
   allPlayers: RuntimePlayer[];
   ball: RuntimeBall;
@@ -170,6 +209,13 @@ const EMPTY_STATS = () => ({
   redCards: 0,
   offsides: 0,
   substitutions: 0,
+  throwIns: 0,
+  corners: 0,
+  goalKicks: 0,
+  freeKicks: 0,
+  penalties: 0,
+  goalkeeperSaves: 0,
+  goalsFromSetPieces: 0,
   possessionTicks: 0,
 });
 
@@ -182,11 +228,12 @@ export function simulateMatch(params: {
   recordReplay?: boolean;
   recordSpatialAnalytics?: boolean;
 }): MatchSimulationOutput {
-  const logicalDuration = clamp(
+  const regulationLogicalDuration = clamp(
     params.logicalSeconds ?? MATCH_CONFIG.logicalSeconds,
     60,
     900,
   );
+  const periodRegulationDuration = regulationLogicalDuration / 2;
 
   const playerMap = new Map(
     params.players.map((player) => [player.playerId, player]),
@@ -215,7 +262,17 @@ export function simulateMatch(params: {
 
   const state: MatchState = {
     t: 0,
-    logicalDuration,
+    logicalDuration: regulationLogicalDuration,
+    regulationLogicalDuration,
+    period: 1,
+    periodElapsed: 0,
+    periodRegulationDuration,
+    periodAddedTarget: 0,
+    firstHalfAddedLogical: 0,
+    secondHalfAddedLogical: 0,
+    addedTimeAnnounced: false,
+    matchEnded: false,
+    restart: null,
     teams: [home, away],
     allPlayers,
     ball: {
@@ -252,30 +309,67 @@ export function simulateMatch(params: {
     captureFrame(state);
   }
 
-  while (state.t < state.logicalDuration - 1e-9) {
+  const safetyLimit = regulationLogicalDuration * 1.65;
+  while (!state.matchEnded && state.t < safetyLimit) {
     if (
-      !state.halftimeEmitted &&
-      state.t >= state.logicalDuration / 2
+      !state.addedTimeAnnounced &&
+      state.periodElapsed >= state.periodRegulationDuration
     ) {
-      state.halftimeEmitted = true;
-      emit(state, {
-        type: "HALF_TIME",
-        message: "Mi-temps.",
-      });
+      state.addedTimeAnnounced = true;
+      if (state.periodAddedTarget > 0.05) {
+        emit(state, {
+          type: "ADDED_TIME",
+          message: `${Math.max(1, Math.ceil(logicalExtraToDisplayedMinutes(state, state.periodAddedTarget)))} minute(s) de temps additionnel.`,
+        });
+      }
+    }
+
+    if (
+      !state.restart &&
+      state.periodElapsed >=
+      state.periodRegulationDuration + state.periodAddedTarget
+    ) {
+      if (state.period === 1) {
+        state.firstHalfAddedLogical = state.periodAddedTarget;
+        emit(state, {
+          type: "HALF_TIME",
+          message: "Mi-temps.",
+        });
+        state.period = 2;
+        state.periodElapsed = 0;
+        state.periodAddedTarget = 0;
+        state.addedTimeAnnounced = false;
+        state.halftimeEmitted = true;
+        state.nextDecisionAt = state.t;
+        resetForKickoff(state, away.index);
+        emit(state, {
+          type: "KICKOFF",
+          team: "AWAY",
+          message: `${away.name} donne le coup d'envoi de la seconde période.`,
+        });
+        if (state.recordReplay) captureFrame(state);
+      } else {
+        state.secondHalfAddedLogical = state.periodAddedTarget;
+        state.matchEnded = true;
+        break;
+      }
     }
 
     if (state.t + 1e-9 >= state.nextDecisionAt) {
-      decisionTick(state);
+      if (!state.restart) {
+        decisionTick(state);
+      }
       state.nextDecisionAt += MATCH_CONFIG.decisionInterval;
     }
 
-    const dt = Math.min(
-      MATCH_CONFIG.physicsStep,
-      state.logicalDuration - state.t,
-    );
+    const dt = MATCH_CONFIG.physicsStep;
 
     updateMovement(state, dt);
-    updateBall(state, dt);
+    if (state.restart && state.t + dt >= state.restart.resumeAt) {
+      executeRestart(state);
+    } else {
+      updateBall(state, dt);
+    }
     updatePossessionCounter(state);
     evaluateAutomaticSubstitutions(state);
 
@@ -287,7 +381,16 @@ export function simulateMatch(params: {
       state.nextSpatialAt += MATCH_CONFIG.spatialSampleInterval;
     }
 
+    if (state.restart?.countsForAddedTime) {
+      state.periodAddedTarget = Math.min(
+        MATCH_CONFIG.addedTime.maxLogicalSecondsPerHalf,
+        state.periodAddedTarget +
+          dt * MATCH_CONFIG.addedTime.compensationRatio,
+      );
+    }
+
     state.t += dt;
+    state.periodElapsed += dt;
 
     if (
       state.recordReplay &&
@@ -298,6 +401,7 @@ export function simulateMatch(params: {
     }
   }
 
+  state.logicalDuration = state.t;
   emit(state, {
     type: "FULL_TIME",
     message: `Fin du match : ${home.name} ${home.score} - ${away.score} ${away.name}.`,
@@ -335,7 +439,12 @@ export function simulateMatch(params: {
     engineVersion: ENGINE_VERSION,
     seed: params.seed,
     logicalDuration: state.logicalDuration,
+    regulationLogicalDuration: state.regulationLogicalDuration,
     displayedMinutes: MATCH_CONFIG.displayedMinutes,
+    addedTime: {
+      firstHalfMinutes: round(logicalExtraToDisplayedMinutes(state, state.firstHalfAddedLogical), 1),
+      secondHalfMinutes: round(logicalExtraToDisplayedMinutes(state, state.secondHalfAddedLogical), 1),
+    },
     frameInterval: MATCH_CONFIG.replayFrameInterval,
     homeName: home.name,
     awayName: away.name,
@@ -465,6 +574,10 @@ function decisionTick(state: MatchState): void {
       mode: "LOOSE",
       pos: { ...state.ball.pos },
       age: 0,
+      velocity: { x: 0, y: 0 },
+      deceleration: MATCH_CONFIG.ball.passDeceleration,
+      lastTouchTeamIndex: owner?.teamIndex,
+      lastTouchPlayerId: owner?.runtimeId,
     };
     return;
   }
@@ -658,6 +771,7 @@ function startPass(
   state: MatchState,
   passer: RuntimePlayer,
   receiverId: string,
+  options?: { skipOffside?: boolean; setPieceOrigin?: RestartType },
 ): void {
   const receiver = getPlayer(state, receiverId);
   if (!receiver || !passer.assignedPosition) {
@@ -665,20 +779,18 @@ function startPass(
   }
 
   const team = state.teams[passer.teamIndex];
+  const kickOrigin =
+    state.ball.mode === "CONTROLLED" && state.ball.ownerId === passer.runtimeId
+      ? { ...state.ball.pos }
+      : { ...passer.pos };
 
   if (
+    !options?.skipOffside &&
     MATCH_CONFIG.offsides.enabled &&
     isPlayerOffside(state, passer, receiver)
   ) {
     team.stats.passesAttempted += 1;
     team.stats.offsides += 1;
-    const defendingTeam = state.teams[otherTeamIndex(passer.teamIndex)];
-    const restartPlayer =
-      nearestPlayerToPoint(
-        receiver.pos,
-        defendingTeam.players.filter((player) => player.active),
-      ) ?? findActiveBySlot(defendingTeam, "GK");
-
     emit(state, {
       type: "OFFSIDE",
       team: passer.side,
@@ -687,9 +799,13 @@ function startPass(
       message: `${receiver.card.shortName} est signalé hors-jeu.`,
     });
 
-    if (restartPlayer) {
-      setControlledBall(state, restartPlayer, { ...receiver.pos });
-    }
+    scheduleRestart(state, {
+      type: "FREE_KICK",
+      teamIndex: otherTeamIndex(passer.teamIndex),
+      spot: { ...receiver.pos },
+      pause: MATCH_CONFIG.setPieces.freeKickPause,
+      message: `Coup franc indirect après le hors-jeu de ${receiver.card.shortName}.`,
+    });
     return;
   }
   const opponents = state.teams[otherTeamIndex(passer.teamIndex)].players.filter(
@@ -713,7 +829,7 @@ function startPass(
           y: lerp(receiver.pos.y, receiver.target.y, 0.28),
         };
 
-  const distance = distanceBetween(passer.pos, receiverTarget);
+  const distance = distanceBetween(kickOrigin, receiverTarget);
   const pressure = clamp(
     (0.07 - nearestDistance(passer.pos, opponents)) / 0.07,
   );
@@ -762,15 +878,15 @@ function startPass(
   );
 
   const direction = normalizeVector({
-    x: target.x - passer.pos.x,
-    y: target.y - passer.pos.y,
+    x: target.x - kickOrigin.x,
+    y: target.y - kickOrigin.y,
   });
 
   team.stats.passesAttempted += 1;
 
   state.ball = {
     mode: "LOOSE",
-    pos: { ...passer.pos },
+    pos: { ...kickOrigin },
     age: 0,
     velocity: {
       x: direction.x * kickSpeed,
@@ -781,6 +897,9 @@ function startPass(
     actorId: passer.runtimeId,
     intendedReceiverId: receiver.runtimeId,
     kind: "PASS",
+    lastTouchTeamIndex: passer.teamIndex,
+    lastTouchPlayerId: passer.runtimeId,
+    setPieceOrigin: options?.setPieceOrigin,
   };
 
   // Le receveur et les adversaires proches commencent immédiatement à courir
@@ -796,20 +915,24 @@ function startPass(
   });
 }
 
-function startShot(state: MatchState, shooter: RuntimePlayer): void {
+function startShot(
+  state: MatchState,
+  shooter: RuntimePlayer,
+  setPieceOrigin?: RestartType,
+): void {
   if (!shooter.assignedPosition) {
     return;
   }
 
+  const shotOrigin =
+    state.ball.mode === "CONTROLLED" && state.ball.ownerId === shooter.runtimeId
+      ? { ...state.ball.pos }
+      : { ...shooter.pos };
   const attackingTeam = state.teams[shooter.teamIndex];
   const defendingTeam = state.teams[otherTeamIndex(shooter.teamIndex)];
   const goalkeeper =
     findActiveBySlot(defendingTeam, "GK") ??
     defendingTeam.players.find((player) => player.active);
-
-  if (!goalkeeper || !goalkeeper.assignedPosition) {
-    return;
-  }
 
   const shooterStats = effectiveStats({
     player: shooter.card,
@@ -818,127 +941,80 @@ function startShot(state: MatchState, shooter: RuntimePlayer): void {
     synergyBonus: shooter.synergyBonus,
   });
 
-  const goalkeeperStats = effectiveStats({
-    player: goalkeeper.card,
-    assignedPosition: goalkeeper.assignedPosition,
-    energy: goalkeeper.energy,
-    synergyBonus: goalkeeper.synergyBonus,
-  });
-
   const goal = opponentGoal(shooter.side);
-  const shotQuality = estimateShotQuality(shooter.pos, shooter.side);
-  const execution =
-    (0.85 * shooterStats.shooting +
-      0.13 * shooterStats.technique +
+  const distance = distanceBetween(shotOrigin, goal);
+  const execution = clamp(
+    (0.84 * shooterStats.shooting +
+      0.14 * shooterStats.technique +
       0.02 * shooterStats.intelligence) /
-    100;
-
-  const goalkeeperQuality =
-    (0.42 * goalkeeperStats.technique +
-      0.25 * goalkeeperStats.intelligence +
-      0.18 * goalkeeperStats.speed +
-      0.15 * goalkeeperStats.physical) /
-    100;
-
-  const angleFactor = clamp(1 - Math.abs(shooter.pos.y - 0.5) * 1.25, 0.3, 1);
-  const onTargetProbability = clamp(
-    0.20 + 0.72 * execution * angleFactor,
-    0.14,
-    0.96,
+      100,
   );
 
-  const rawGoalProbability = clamp(
-    shotQuality *
-      (0.03 + 0.38 * execution) *
-      (1.02 - 0.50 * goalkeeperQuality),
-    0.01,
-    0.72,
+  // Aucun résultat n'est tiré ici. Les stats déterminent seulement la direction
+  // et la vitesse initiales. Le but sera validé uniquement si la balle traverse
+  // réellement la ligne entre les poteaux.
+  const aimedY =
+    0.5 + state.rng.between(-0.065, 0.065);
+  const aimError =
+    0.018 +
+    (1 - execution) * (0.16 + distance * 0.22);
+  const targetY = aimedY + state.rng.between(-aimError, aimError);
+  const beyondGoalX = goal.x + attackDirection(shooter.side) * 0.035;
+  const direction = normalizeVector({
+    x: beyondGoalX - shotOrigin.x,
+    y: targetY - shotOrigin.y,
+  });
+  const shotSpeed = clamp(
+    MATCH_CONFIG.ball.shotMinSpeed +
+      execution *
+        (MATCH_CONFIG.ball.shotMaxSpeed - MATCH_CONFIG.ball.shotMinSpeed) +
+      state.rng.between(-0.035, 0.035),
+    MATCH_CONFIG.ball.shotMinSpeed,
+    MATCH_CONFIG.ball.shotMaxSpeed,
   );
-
-  let shotResult: "GOAL" | "SAVE_CATCH" | "SAVE_REBOUND" | "MISS";
-  if (!state.rng.chance(onTargetProbability)) {
-    shotResult = "MISS";
-  } else {
-    attackingTeam.stats.shotsOnTarget += 1;
-    const conditionalGoal = clamp(
-      rawGoalProbability / Math.max(onTargetProbability, 0.1),
-      0.02,
-      0.82,
-    );
-
-    if (state.rng.chance(conditionalGoal)) {
-      shotResult = "GOAL";
-    } else {
-      const catchProbability = clamp(
-        0.18 +
-          0.55 * goalkeeperQuality -
-          0.24 * execution -
-          0.10 * shotQuality,
-        0.08,
-        0.78,
-      );
-      shotResult = state.rng.chance(catchProbability)
-        ? "SAVE_CATCH"
-        : "SAVE_REBOUND";
-    }
-  }
 
   attackingTeam.stats.shots += 1;
-  if (state.t - state.possessionChangedAt <=
-    MATCH_CONFIG.possession.transitionShotWindowSeconds) {
+  if (
+    state.t - state.possessionChangedAt <=
+    MATCH_CONFIG.possession.transitionShotWindowSeconds
+  ) {
     attackingTeam.stats.transitionShots += 1;
   }
 
-  const targetY =
-    shotResult === "MISS"
-      ? clamp(goal.y + state.rng.between(-0.18, 0.18), 0.18, 0.82)
-      : clamp(goal.y + state.rng.between(-0.07, 0.07), 0.39, 0.61);
-
-  const shotTarget = { x: goal.x, y: targetY };
-  const reboundTo =
-    shotResult === "SAVE_REBOUND"
-      ? {
-          x: clamp(
-            goalkeeper.pos.x -
-              attackDirection(shooter.side) *
-                state.rng.between(0.035, 0.09),
-            0.03,
-            0.97,
-          ),
-          y: clamp(
-            goalkeeper.pos.y + state.rng.between(-0.09, 0.09),
-            0.06,
-            0.94,
-          ),
-        }
-      : undefined;
-
-  goalkeeper.target = {
-    x: clamp(
-      lerp(goalkeeper.pos.x, shotTarget.x, 0.35),
-      0.02,
-      0.98,
-    ),
-    y: clamp(shotTarget.y, 0.34, 0.66),
-  };
-
   state.ball = {
-    mode: "TRANSIT",
-    kind: "SHOT",
+    mode: "LOOSE",
+    pos: { ...shotOrigin },
+    age: 0,
+    velocity: {
+      x: direction.x * shotSpeed,
+      y: direction.y * shotSpeed,
+    },
+    deceleration: MATCH_CONFIG.ball.shotDeceleration,
+    sourceTeamIndex: shooter.teamIndex,
     actorId: shooter.runtimeId,
-    from: { ...shooter.pos },
-    to: shotTarget,
-    pos: { ...shooter.pos },
-    elapsed: 0,
-    duration: clamp(
-      0.62 + distanceBetween(shooter.pos, goal) * 0.75,
-      MATCH_CONFIG.ball.shotMinDuration,
-      MATCH_CONFIG.ball.shotMaxDuration,
-    ),
-    shotResult,
-    goalkeeperId: goalkeeper.runtimeId,
-    reboundTo,
+    kind: "SHOT",
+    lastTouchTeamIndex: shooter.teamIndex,
+    lastTouchPlayerId: shooter.runtimeId,
+    setPieceOrigin,
   };
+
+  if (goalkeeper?.active) {
+    // Le gardien anticipe le point d'intersection avec sa ligne de but. Il doit
+    // ensuite physiquement atteindre la trajectoire pour pouvoir intervenir.
+    const intersectionY = lineYAtX(
+      shotOrigin,
+      { x: beyondGoalX, y: targetY },
+      goal.x,
+    );
+    goalkeeper.target = {
+      x: goalkeeper.side === "HOME" ? 0.018 : 0.982,
+      y: clamp(
+        intersectionY,
+        MATCH_CONFIG.ball.goalMouthMinY - 0.05,
+        MATCH_CONFIG.ball.goalMouthMaxY + 0.05,
+      ),
+    };
+  }
 
   emit(state, {
     type: "SHOT",
@@ -950,50 +1026,97 @@ function startShot(state: MatchState, shooter: RuntimePlayer): void {
 }
 
 function updateBall(state: MatchState, dt: number): void {
+  if (state.ball.mode === "DEAD") {
+    return;
+  }
+
   if (state.ball.mode === "CONTROLLED") {
     const owner = getPlayer(state, state.ball.ownerId);
     if (owner?.active) {
-      state.ball.pos = { ...owner.pos };
+      const elapsed = state.t - (state.ball.controlAt ?? state.t);
+      const settle = 1 - clamp(elapsed / 0.28, 0, 1);
+      const offset = state.ball.controlOffset ?? { x: 0, y: 0 };
+      state.ball.pos = {
+        x: owner.pos.x + offset.x * settle,
+        y: owner.pos.y + offset.y * settle,
+      };
     } else {
       state.ball = {
         mode: "LOOSE",
         pos: { ...state.ball.pos },
         age: 0,
         velocity: { x: 0, y: 0 },
+        deceleration: MATCH_CONFIG.ball.passDeceleration,
+        lastTouchTeamIndex: owner?.teamIndex,
+        lastTouchPlayerId: owner?.runtimeId,
       };
     }
     return;
   }
 
-  if (state.ball.mode === "LOOSE") {
-    const previousPos = { ...state.ball.pos };
-    const velocity = state.ball.velocity ?? { x: 0, y: 0 };
-    const currentSpeed = vectorLength(velocity);
+  if (state.ball.mode === "TRANSIT") {
+    // Compatibilité de replay avec d'anciens états ; la V0.5 ne crée plus de
+    // TransitBall pour les nouvelles actions.
+    state.ball.elapsed += dt;
+    const progress = clamp(state.ball.elapsed / state.ball.duration);
+    state.ball.pos = {
+      x: lerp(state.ball.from.x, state.ball.to.x, progress),
+      y: lerp(state.ball.from.y, state.ball.to.y, progress),
+    };
+    if (progress >= 1) {
+      state.ball = {
+        mode: "LOOSE",
+        pos: { ...state.ball.pos },
+        age: 0,
+        velocity: { x: 0, y: 0 },
+        deceleration: MATCH_CONFIG.ball.passDeceleration,
+      };
+    }
+    return;
+  }
+
+  let remaining = dt;
+  while (remaining > 1e-9 && state.ball.mode === "LOOSE") {
+    const step = Math.min(MATCH_CONFIG.ballSubstep, remaining);
+    remaining -= step;
+
+    const ball = state.ball;
+    const previousPos = { ...ball.pos };
+    const currentSpeed = vectorLength(ball.velocity);
 
     if (currentSpeed > 0) {
-      state.ball.pos = {
-        x: state.ball.pos.x + velocity.x * dt,
-        y: state.ball.pos.y + velocity.y * dt,
+      ball.pos = {
+        x: ball.pos.x + ball.velocity.x * step,
+        y: ball.pos.y + ball.velocity.y * step,
       };
+    }
+    ball.age += step;
 
-      // Le prototype ne gère pas encore les touches/corners : on conserve la
-      // balle dans le terrain et on amortit fortement l'axe qui touche la ligne.
-      if (state.ball.pos.x < 0.01 || state.ball.pos.x > 0.99) {
-        state.ball.pos.x = clamp(state.ball.pos.x, 0.01, 0.99);
-        velocity.x *= -0.18;
+    if (ball.kind === "SHOT") {
+      if (tryPhysicalShotInterception(state, previousPos, ball.pos)) {
+        if (state.ball.mode !== "LOOSE") return;
       }
-      if (state.ball.pos.y < 0.01 || state.ball.pos.y > 0.99) {
-        state.ball.pos.y = clamp(state.ball.pos.y, 0.01, 0.99);
-        velocity.y *= -0.18;
-      }
+    }
 
-      const deceleration =
-        state.ball.deceleration ?? MATCH_CONFIG.ball.passDeceleration;
-      const nextSpeed = Math.max(0, currentSpeed - deceleration * dt);
+    if (state.ball.mode !== "LOOSE") return;
+
+    const crossing = detectPitchBoundaryCrossing(previousPos, state.ball.pos);
+    if (crossing) {
+      state.ball.pos = { ...crossing.point };
+      handleBoundaryCrossing(state, crossing);
+      return;
+    }
+
+    const speedBeforeDecay = vectorLength(state.ball.velocity);
+    if (speedBeforeDecay > 0) {
+      const nextSpeed = Math.max(
+        0,
+        speedBeforeDecay - state.ball.deceleration * step,
+      );
       if (nextSpeed <= MATCH_CONFIG.ball.looseBallStopSpeed) {
         state.ball.velocity = { x: 0, y: 0 };
       } else {
-        const direction = normalizeVector(velocity);
+        const direction = normalizeVector(state.ball.velocity);
         state.ball.velocity = {
           x: direction.x * nextSpeed,
           y: direction.y * nextSpeed,
@@ -1001,160 +1124,338 @@ function updateBall(state: MatchState, dt: number): void {
       }
     }
 
-    state.ball.age += dt;
-    tryControlLooseBall(state, previousPos, state.ball.pos);
-    return;
-  }
-
-  state.ball.elapsed += dt;
-  const progress = clamp(state.ball.elapsed / state.ball.duration);
-  state.ball.pos = {
-    x: lerp(state.ball.from.x, state.ball.to.x, progress),
-    y: lerp(state.ball.from.y, state.ball.to.y, progress),
-  };
-
-  if (progress < 1) {
-    return;
-  }
-
-  if (state.ball.kind === "PASS") {
-    finishPass(state, state.ball);
-  } else {
-    finishShot(state, state.ball);
+    // Pas de collision "balayée" qui attribuerait la balle à distance : avec
+    // les sous-pas physiques, un joueur ne contrôle que si la balle se trouve
+    // réellement dans son rayon au sous-pas courant.
+    if (
+      state.ball.kind !== "SHOT" ||
+      vectorLength(state.ball.velocity) <
+        MATCH_CONFIG.ball.comfortableControlSpeed * 0.72
+    ) {
+      tryControlLooseBall(state);
+    }
   }
 }
 
-function finishPass(state: MatchState, ball: TransitBall): void {
-  const actor = getPlayer(state, ball.actorId);
-  const receiver = ball.intendedReceiverId
-    ? getPlayer(state, ball.intendedReceiverId)
-    : undefined;
-
-  if (ball.passSuccess && receiver?.active) {
-    state.teams[receiver.teamIndex].stats.passesCompleted += 1;
-    setControlledBall(state, receiver);
-    return;
+function tryPhysicalShotInterception(
+  state: MatchState,
+  segmentStart: Vec2,
+  segmentEnd: Vec2,
+): boolean {
+  if (state.ball.mode !== "LOOSE" || state.ball.kind !== "SHOT") {
+    return false;
   }
 
-  const interceptor = ball.interceptId
-    ? getPlayer(state, ball.interceptId)
-    : undefined;
+  const shot = state.ball;
+  const shooter = shot.actorId ? getPlayer(state, shot.actorId) : undefined;
+  const defendingTeamIndex = shooter
+    ? otherTeamIndex(shooter.teamIndex)
+    : shot.lastTouchTeamIndex !== undefined
+      ? otherTeamIndex(shot.lastTouchTeamIndex)
+      : otherTeamIndex(state.possessionTeamIndex);
+  const defendingTeam = state.teams[defendingTeamIndex];
+  const goalkeeper = findActiveBySlot(defendingTeam, "GK");
+  const ballSpeed = vectorLength(shot.velocity);
 
-  if (interceptor?.active) {
-    setControlledBall(state, interceptor);
-    emit(state, {
-      type: "INTERCEPTION",
-      team: interceptor.side,
-      playerId: interceptor.card.playerId,
-      runtimeId: interceptor.runtimeId,
-      message: `${interceptor.card.shortName} coupe la passe.`,
+  if (goalkeeper?.active && goalkeeper.assignedPosition) {
+    const distance = pointToSegmentDistance(
+      goalkeeper.pos,
+      segmentStart,
+      segmentEnd,
+    );
+    if (distance <= MATCH_CONFIG.ball.goalkeeperParryRadius) {
+      const stats = effectiveStats({
+        player: goalkeeper.card,
+        assignedPosition: goalkeeper.assignedPosition,
+        energy: goalkeeper.energy,
+        synergyBonus: goalkeeper.synergyBonus,
+      });
+      const reachQuality = clamp(
+        (0.40 * stats.technique +
+          0.28 * stats.intelligence +
+          0.18 * stats.speed +
+          0.14 * stats.physical) /
+          100,
+      );
+      const exactness =
+        1 -
+        clamp(
+          distance / MATCH_CONFIG.ball.goalkeeperParryRadius,
+          0,
+          1,
+        );
+      const touchProbability = clamp(
+        0.28 + 0.55 * reachQuality + 0.25 * exactness - 0.16 * ballSpeed,
+        0.12,
+        0.98,
+      );
+
+      if (state.rng.chance(touchProbability)) {
+        defendingTeam.stats.goalkeeperSaves += 1;
+        if (shot.sourceTeamIndex !== undefined) {
+          state.teams[shot.sourceTeamIndex].stats.shotsOnTarget += 1;
+        }
+        defendingTeam.stats.duelsWon += 1;
+        const catchProbability = clamp(
+          0.12 +
+            0.52 * reachQuality +
+            0.22 * exactness -
+            0.42 * clamp(ballSpeed / MATCH_CONFIG.ball.shotMaxSpeed),
+          0.04,
+          0.78,
+        );
+
+        if (
+          distance <= MATCH_CONFIG.ball.goalkeeperCatchRadius &&
+          state.rng.chance(catchProbability)
+        ) {
+          goalkeeper.pos = moveTowards(
+            goalkeeper.pos,
+            shot.pos,
+            MATCH_CONFIG.ball.goalkeeperCatchRadius,
+          );
+          setControlledBall(state, goalkeeper, { ...shot.pos });
+          emit(state, {
+            type: "SAVE",
+            team: goalkeeper.side,
+            playerId: goalkeeper.card.playerId,
+            runtimeId: goalkeeper.runtimeId,
+            message: `${goalkeeper.card.shortName} capte le tir sur sa trajectoire.`,
+          });
+          return true;
+        }
+
+        const awayFromGoal = attackDirection(goalkeeper.side);
+        const rebound = normalizeVector({
+          x: awayFromGoal + state.rng.between(-0.18, 0.18),
+          y: state.rng.between(-0.65, 0.65),
+        });
+        shot.pos = { ...segmentEnd };
+        shot.velocity = {
+          x: rebound.x * Math.max(0.10, ballSpeed * 0.42),
+          y: rebound.y * Math.max(0.10, ballSpeed * 0.42),
+        };
+        shot.deceleration = MATCH_CONFIG.ball.reboundDeceleration;
+        shot.kind = "REBOUND";
+        shot.lastTouchTeamIndex = goalkeeper.teamIndex;
+        shot.lastTouchPlayerId = goalkeeper.runtimeId;
+        emit(state, {
+          type: "SAVE",
+          team: goalkeeper.side,
+          playerId: goalkeeper.card.playerId,
+          runtimeId: goalkeeper.runtimeId,
+          message: `${goalkeeper.card.shortName} repousse le tir !`,
+        });
+        return true;
+      }
+    }
+  }
+
+  // Un défenseur placé physiquement sur la trajectoire peut contrer le tir.
+  const blockers = defendingTeam.players
+    .filter(
+      (player) =>
+        player.active &&
+        player.assignedPosition !== "GK" &&
+        player.runtimeId !== shot.actorId &&
+        player.stunnedUntil <= state.t,
+    )
+    .map((player) => ({
+      player,
+      distance: pointToSegmentDistance(player.pos, segmentStart, segmentEnd),
+    }))
+    .filter(({ distance }) => distance <= 0.010)
+    .sort((a, b) => a.distance - b.distance);
+
+  const blocker = blockers[0]?.player;
+  if (blocker?.assignedPosition) {
+    const stats = effectiveStats({
+      player: blocker.card,
+      assignedPosition: blocker.assignedPosition,
+      energy: blocker.energy,
+      synergyBonus: blocker.synergyBonus,
     });
-    return;
+    const blockProbability = clamp(
+      0.22 + 0.28 * (stats.physical / 100) + 0.25 * (stats.intelligence / 100),
+      0.15,
+      0.78,
+    );
+    if (state.rng.chance(blockProbability)) {
+      const current = normalizeVector(shot.velocity);
+      const deflected = rotateVector(
+        current,
+        state.rng.between(-0.85, 0.85),
+      );
+      shot.velocity = {
+        x: deflected.x * ballSpeed * 0.52,
+        y: deflected.y * ballSpeed * 0.52,
+      };
+      shot.deceleration = MATCH_CONFIG.ball.reboundDeceleration;
+      shot.kind = "DEFLECTION";
+      shot.lastTouchTeamIndex = blocker.teamIndex;
+      shot.lastTouchPlayerId = blocker.runtimeId;
+      return true;
+    }
   }
 
-  state.ball = {
-    mode: "LOOSE",
-    pos: { ...ball.to },
-    age: 0,
-  };
-
-  if (actor) {
-    emit(state, {
-      type: "INTERCEPTION",
-      team: otherSide(actor.side),
-      message: "La passe n'arrive pas à destination, ballon libre.",
-    });
-  }
+  return false;
 }
 
-function finishShot(state: MatchState, ball: TransitBall): void {
-  const shooter = getPlayer(state, ball.actorId);
-  const goalkeeper = ball.goalkeeperId
-    ? getPlayer(state, ball.goalkeeperId)
-    : undefined;
+type BoundaryCrossing = {
+  boundary: "LEFT_GOAL_LINE" | "RIGHT_GOAL_LINE" | "TOP_TOUCHLINE" | "BOTTOM_TOUCHLINE";
+  point: Vec2;
+};
 
-  if (!shooter) {
-    state.ball = { mode: "LOOSE", pos: { ...ball.to }, age: 0 };
-    return;
-  }
+function detectPitchBoundaryCrossing(
+  from: Vec2,
+  to: Vec2,
+): BoundaryCrossing | null {
+  const candidates: Array<BoundaryCrossing & { t: number }> = [];
 
-  if (ball.shotResult === "GOAL") {
-    const team = state.teams[shooter.teamIndex];
-    team.score += 1;
-    emit(state, {
-      type: "GOAL",
-      team: shooter.side,
-      playerId: shooter.card.playerId,
-      runtimeId: shooter.runtimeId,
-      message: `BUT ! ${shooter.card.shortName} marque pour ${team.name}.`,
-    });
-    resetForKickoff(state, otherTeamIndex(shooter.teamIndex));
-    return;
-  }
+  const addX = (x: number, boundary: BoundaryCrossing["boundary"]) => {
+    const dx = to.x - from.x;
+    if (Math.abs(dx) < 1e-9) return;
+    const t = (x - from.x) / dx;
+    if (t > 0 && t <= 1) {
+      const y = from.y + (to.y - from.y) * t;
+      if (y >= 0 && y <= 1) candidates.push({ boundary, point: { x, y }, t });
+    }
+  };
+  const addY = (y: number, boundary: BoundaryCrossing["boundary"]) => {
+    const dy = to.y - from.y;
+    if (Math.abs(dy) < 1e-9) return;
+    const t = (y - from.y) / dy;
+    if (t > 0 && t <= 1) {
+      const x = from.x + (to.x - from.x) * t;
+      if (x >= 0 && x <= 1) candidates.push({ boundary, point: { x, y }, t });
+    }
+  };
 
-  if (ball.shotResult === "SAVE_CATCH" && goalkeeper?.active) {
-    setControlledBall(state, goalkeeper);
-    emit(state, {
-      type: "SAVE",
-      team: goalkeeper.side,
-      playerId: goalkeeper.card.playerId,
-      runtimeId: goalkeeper.runtimeId,
-      message: `${goalkeeper.card.shortName} capte le tir.`,
-    });
-    return;
-  }
+  if (to.x < 0) addX(0, "LEFT_GOAL_LINE");
+  if (to.x > 1) addX(1, "RIGHT_GOAL_LINE");
+  if (to.y < 0) addY(0, "TOP_TOUCHLINE");
+  if (to.y > 1) addY(1, "BOTTOM_TOUCHLINE");
 
-  if (ball.shotResult === "SAVE_REBOUND" && goalkeeper?.active) {
-    const reboundTarget = ball.reboundTo ?? {
-      x: goalkeeper.pos.x + attackDirection(goalkeeper.side) * 0.06,
-      y: goalkeeper.pos.y,
-    };
-    const reboundDirection = normalizeVector({
-      x: reboundTarget.x - goalkeeper.pos.x,
-      y: reboundTarget.y - goalkeeper.pos.y,
-    });
-    const reboundSpeed = state.rng.between(0.10, 0.18);
-    state.ball = {
-      mode: "LOOSE",
-      pos: { ...goalkeeper.pos },
-      age: 0,
-      velocity: {
-        x: reboundDirection.x * reboundSpeed,
-        y: reboundDirection.y * reboundSpeed,
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => a.t - b.t);
+  const { boundary, point } = candidates[0];
+  return { boundary, point };
+}
+
+function handleBoundaryCrossing(
+  state: MatchState,
+  crossing: BoundaryCrossing,
+): void {
+  if (state.ball.mode !== "LOOSE") return;
+  const ball = state.ball;
+  const lastTouchTeam = ball.lastTouchTeamIndex ?? ball.sourceTeamIndex ?? state.possessionTeamIndex;
+
+  if (
+    crossing.boundary === "TOP_TOUCHLINE" ||
+    crossing.boundary === "BOTTOM_TOUCHLINE"
+  ) {
+    const restartTeam = otherTeamIndex(lastTouchTeam);
+    scheduleRestart(state, {
+      type: "THROW_IN",
+      teamIndex: restartTeam,
+      spot: {
+        x: clamp(crossing.point.x, 0.03, 0.97),
+        y: crossing.boundary === "TOP_TOUCHLINE" ? 0 : 1,
       },
-      deceleration: MATCH_CONFIG.ball.reboundDeceleration,
-      sourceTeamIndex: shooter.teamIndex,
-      actorId: shooter.runtimeId,
-      kind: "REBOUND",
-    };
-    emit(state, {
-      type: "SAVE",
-      team: goalkeeper.side,
-      playerId: goalkeeper.card.playerId,
-      runtimeId: goalkeeper.runtimeId,
-      message: `${goalkeeper.card.shortName} repousse le tir !`,
+      pause: MATCH_CONFIG.setPieces.throwInPause,
     });
     return;
+  }
+
+  const isLeft = crossing.boundary === "LEFT_GOAL_LINE";
+  const defendingTeamIndex: TeamIndex = isLeft ? 0 : 1;
+  const attackingTeamIndex = otherTeamIndex(defendingTeamIndex);
+  const betweenPosts =
+    crossing.point.y >= MATCH_CONFIG.ball.goalMouthMinY &&
+    crossing.point.y <= MATCH_CONFIG.ball.goalMouthMaxY;
+
+  if (betweenPosts) {
+    registerPhysicalGoal(state, attackingTeamIndex, ball);
+    return;
+  }
+
+  if (
+    ball.kind === "SHOT" &&
+    ball.lastTouchTeamIndex === ball.sourceTeamIndex &&
+    ball.actorId
+  ) {
+    const shooter = getPlayer(state, ball.actorId);
+    emit(state, {
+      type: "MISS",
+      team: shooter?.side,
+      playerId: shooter?.card.playerId,
+      runtimeId: shooter?.runtimeId,
+      message: shooter
+        ? `${shooter.card.shortName} ne cadre pas.`
+        : "Le tir passe à côté.",
+    });
+  }
+
+  if (lastTouchTeam === defendingTeamIndex) {
+    const cornerY = crossing.point.y < 0.5 ? 0 : 1;
+    scheduleRestart(state, {
+      type: "CORNER",
+      teamIndex: attackingTeamIndex,
+      spot: { x: isLeft ? 0 : 1, y: cornerY },
+      pause: MATCH_CONFIG.setPieces.cornerPause,
+    });
+  } else {
+    scheduleRestart(state, {
+      type: "GOAL_KICK",
+      teamIndex: defendingTeamIndex,
+      spot: {
+        x: isLeft ? 0.07 : 0.93,
+        y: 0.5,
+      },
+      pause: MATCH_CONFIG.setPieces.goalKickPause,
+    });
+  }
+}
+
+function registerPhysicalGoal(
+  state: MatchState,
+  scoringTeamIndex: TeamIndex,
+  ball: LooseBall,
+): void {
+  const scoringTeam = state.teams[scoringTeamIndex];
+  scoringTeam.score += 1;
+  if (ball.kind === "SHOT" && ball.sourceTeamIndex !== undefined) {
+    state.teams[ball.sourceTeamIndex].stats.shotsOnTarget += 1;
+  }
+
+  const lastTouch = ball.lastTouchPlayerId
+    ? getPlayer(state, ball.lastTouchPlayerId)
+    : undefined;
+  const scorer = lastTouch?.teamIndex === scoringTeamIndex ? lastTouch : undefined;
+  const message = scorer
+    ? `BUT ! ${scorer.card.shortName} marque pour ${scoringTeam.name}.`
+    : `BUT ! ${scoringTeam.name} marque, avec une dernière déviation adverse.`;
+
+  if (ball.setPieceOrigin && ball.setPieceOrigin !== "KICKOFF") {
+    scoringTeam.stats.goalsFromSetPieces += 1;
   }
 
   emit(state, {
-    type: "MISS",
-    team: shooter.side,
-    playerId: shooter.card.playerId,
-    runtimeId: shooter.runtimeId,
-    message: `${shooter.card.shortName} ne cadre pas.`,
+    type: "GOAL",
+    team: scoringTeam.side,
+    playerId: scorer?.card.playerId,
+    runtimeId: scorer?.runtimeId,
+    message,
   });
 
-  const defendingTeam = state.teams[otherTeamIndex(shooter.teamIndex)];
-  const goalKickKeeper =
-    findActiveBySlot(defendingTeam, "GK") ??
-    defendingTeam.players.find((player) => player.active);
-
-  if (goalKickKeeper) {
-    setControlledBall(state, goalKickKeeper);
-  } else {
-    state.ball = { mode: "LOOSE", pos: { x: 0.5, y: 0.5 }, age: 0 };
-  }
+  scheduleRestart(state, {
+    type: "KICKOFF",
+    teamIndex: otherTeamIndex(scoringTeamIndex),
+    spot: { x: 0.5, y: 0.5 },
+    pause: MATCH_CONFIG.setPieces.kickoffPause,
+    emitStartEvent: false,
+    preserveScene: true,
+  });
 }
 
 function attemptDefensiveDuel(
@@ -1271,11 +1572,7 @@ function handleFoul(
     message: `Faute de ${defender.card.shortName} sur ${victim.card.shortName}.`,
   });
 
-  // Après une faute, on redonne simplement le ballon à la victime.
-  setControlledBall(state, victim);
-
   const severity = state.rng.next();
-
   if (severity < 0.018) {
     giveRedCard(state, defender, "carton rouge direct");
   } else if (severity < 0.29) {
@@ -1283,6 +1580,19 @@ function handleFoul(
   }
 
   maybeInjuryFromContact(state, victim, defender, 1.8);
+
+  const penalty = isInsideOwnPenaltyArea(victim.pos, defender.side);
+  scheduleRestart(state, {
+    type: penalty ? "PENALTY" : "FREE_KICK",
+    teamIndex: victim.teamIndex,
+    spot: penalty ? penaltySpotForAttack(victim.side) : { ...victim.pos },
+    pause: penalty
+      ? MATCH_CONFIG.setPieces.penaltyPause
+      : MATCH_CONFIG.setPieces.freeKickPause,
+    message: penalty
+      ? `Penalty pour ${state.teams[victim.teamIndex].name} !`
+      : `Coup franc pour ${state.teams[victim.teamIndex].name}.`,
+  });
 }
 
 function giveYellowCard(state: MatchState, player: RuntimePlayer): void {
@@ -1339,6 +1649,10 @@ function giveRedCard(
       mode: "LOOSE",
       pos: { ...player.pos },
       age: 0,
+      velocity: { x: 0, y: 0 },
+      deceleration: MATCH_CONFIG.ball.passDeceleration,
+      lastTouchTeamIndex: player.teamIndex,
+      lastTouchPlayerId: player.runtimeId,
     };
   }
 
@@ -1439,13 +1753,11 @@ function resolveLooseBall(state: MatchState): void {
 
   // Pour une balle déjà quasiment immobile, une prise de contrôle n'est
   // possible qu'à très courte distance. Aucun joueur n'est téléporté dessus.
-  tryControlLooseBall(state, state.ball.pos, state.ball.pos);
+  tryControlLooseBall(state);
 }
 
 function tryControlLooseBall(
   state: MatchState,
-  segmentStart: Vec2,
-  segmentEnd: Vec2,
 ): void {
   if (state.ball.mode !== "LOOSE") {
     return;
@@ -1481,7 +1793,7 @@ function tryControlLooseBall(
       return {
         player,
         stats,
-        distance: pointToSegmentDistance(player.pos, segmentStart, segmentEnd),
+        distance: distanceBetween(player.pos, looseBall.pos),
         controlRadius,
       };
     })
@@ -1564,7 +1876,7 @@ function tryControlLooseBall(
       });
     }
 
-    setControlledBall(state, player, { ...state.ball.pos });
+    setControlledBall(state, player, { ...looseBall.pos });
     return;
   }
 }
@@ -1590,7 +1902,7 @@ function predictLooseBallStop(ball: LooseBall): Vec2 {
 function setControlledBall(
   state: MatchState,
   player: RuntimePlayer,
-  pos: Vec2 = player.pos,
+  contactPos: Vec2 = player.pos,
 ): void {
   if (state.possessionTeamIndex !== player.teamIndex) {
     state.possessionTeamIndex = player.teamIndex;
@@ -1601,7 +1913,12 @@ function setControlledBall(
   state.ball = {
     mode: "CONTROLLED",
     ownerId: player.runtimeId,
-    pos: { ...pos },
+    pos: { ...contactPos },
+    controlOffset: {
+      x: contactPos.x - player.pos.x,
+      y: contactPos.y - player.pos.y,
+    },
+    controlAt: state.t,
   };
   state.controlStartedAt = state.t;
 }
@@ -1960,9 +2277,22 @@ function updateMovement(state: MatchState, dt: number): void {
       speedPerSecond *= MATCH_CONFIG.duels.stunnedSpeedMultiplier;
     }
 
+    if (
+      player.assignedPosition === "GK" &&
+      state.ball.mode === "LOOSE" &&
+      state.ball.kind === "SHOT" &&
+      state.ball.sourceTeamIndex !== player.teamIndex
+    ) {
+      // Réflexe/détente du gardien : accélération contextuelle, mais le joueur
+      // doit toujours atteindre physiquement la trajectoire de balle.
+      speedPerSecond *= 1.45 + (stats.intelligence / 100) * 0.65;
+    }
+
     const isMakingRun =
       Boolean(player.runTarget) && player.runUntil > state.t;
-    if (
+    if (state.restart) {
+      speedPerSecond *= MATCH_CONFIG.movement.restartRepositionMultiplier;
+    } else if (
       !controlled &&
       !isMakingRun &&
       state.ball.mode !== "LOOSE"
@@ -2187,6 +2517,381 @@ function recomputeSynergy(team: RuntimeTeam): void {
   }
 }
 
+
+type ScheduleRestartParams = {
+  type: RestartType;
+  teamIndex: TeamIndex;
+  spot: Vec2;
+  pause: number;
+  message?: string;
+  emitStartEvent?: boolean;
+  preserveScene?: boolean;
+};
+
+function scheduleRestart(
+  state: MatchState,
+  params: ScheduleRestartParams,
+): void {
+  const team = state.teams[params.teamIndex];
+  const spot = {
+    x: clamp(params.spot.x, 0, 1),
+    y: clamp(params.spot.y, 0, 1),
+  };
+  const taker = selectRestartTaker(state, params.type, params.teamIndex, spot);
+  if (!taker) return;
+
+  const directShotPreferred =
+    params.type === "PENALTY" ||
+    (params.type === "FREE_KICK" &&
+      distanceBetween(spot, opponentGoal(team.side)) <=
+        MATCH_CONFIG.setPieces.closeFreeKickDistance);
+  const wallPlayerIds =
+    params.type === "FREE_KICK" && directShotPreferred
+      ? selectWallPlayers(state, otherTeamIndex(params.teamIndex), spot)
+      : [];
+
+  const deadBallPos = params.preserveScene
+    ? { ...state.ball.pos }
+    : { ...spot };
+  state.ball = { mode: "DEAD", pos: deadBallPos };
+  state.restart = {
+    type: params.type,
+    teamIndex: params.teamIndex,
+    spot,
+    takerId: taker.runtimeId,
+    resumeAt: state.t + params.pause,
+    directShotPreferred,
+    wallPlayerIds,
+    countsForAddedTime: params.type !== "KICKOFF" || state.t > 0,
+  };
+  state.possessionTeamIndex = params.teamIndex;
+
+  const stats = team.stats;
+  switch (params.type) {
+    case "THROW_IN": stats.throwIns += 1; break;
+    case "CORNER": stats.corners += 1; break;
+    case "GOAL_KICK": stats.goalKicks += 1; break;
+    case "FREE_KICK": stats.freeKicks += 1; break;
+    case "PENALTY": stats.penalties += 1; break;
+    default: break;
+  }
+
+  if (!params.preserveScene) {
+    positionPlayersForRestart(state, state.restart);
+  }
+
+  if (params.emitStartEvent ?? true) {
+    const defaultMessage = restartDefaultMessage(params.type, team.name);
+    emit(state, {
+      type: params.type,
+      team: team.side,
+      playerId: taker.card.playerId,
+      runtimeId: taker.runtimeId,
+      message: params.message ?? defaultMessage,
+    });
+  }
+}
+
+function executeRestart(state: MatchState): void {
+  const restart = state.restart;
+  if (!restart) return;
+
+  const team = state.teams[restart.teamIndex];
+  if (restart.type === "KICKOFF") {
+    positionPlayersForRestart(state, restart);
+  }
+  let taker = getPlayer(state, restart.takerId);
+  if (!taker?.active) {
+    taker = selectRestartTaker(state, restart.type, restart.teamIndex, restart.spot);
+  }
+  if (!taker) {
+    state.restart = null;
+    return;
+  }
+
+  taker.pos = { ...restart.spot };
+  taker.target = { ...restart.spot };
+  state.restart = null;
+
+  if (restart.type === "KICKOFF") {
+    setControlledBall(state, taker);
+    emit(state, {
+      type: "KICKOFF",
+      team: team.side,
+      playerId: taker.card.playerId,
+      runtimeId: taker.runtimeId,
+      message: `${team.name} remet le ballon en jeu.`,
+    });
+    return;
+  }
+
+  if (restart.type === "PENALTY") {
+    setControlledBall(state, taker);
+    startShot(state, taker, "PENALTY");
+    return;
+  }
+
+  if (restart.type === "FREE_KICK" && restart.directShotPreferred) {
+    const stats = taker.assignedPosition
+      ? effectiveStats({
+          player: taker.card,
+          assignedPosition: taker.assignedPosition,
+          energy: taker.energy,
+          synergyBonus: taker.synergyBonus,
+        })
+      : null;
+    const directChance = stats
+      ? clamp(0.25 + 0.42 * (stats.intelligence / 100) + 0.18 * (stats.shooting / 100), 0.2, 0.82)
+      : 0.35;
+    if (state.rng.chance(directChance)) {
+      setControlledBall(state, taker);
+      startShot(state, taker, "FREE_KICK");
+      return;
+    }
+  }
+
+  const target = selectRestartPassTarget(state, restart, taker);
+  if (target) {
+    setControlledBall(state, taker);
+    startPass(state, taker, target.runtimeId, {
+      skipOffside: true,
+      setPieceOrigin: restart.type,
+    });
+  } else {
+    setControlledBall(state, taker);
+  }
+}
+
+function restartDefaultMessage(type: RestartType, teamName: string): string {
+  switch (type) {
+    case "THROW_IN": return `Touche pour ${teamName}.`;
+    case "CORNER": return `Corner pour ${teamName}.`;
+    case "GOAL_KICK": return `Six mètres pour ${teamName}.`;
+    case "FREE_KICK": return `Coup franc pour ${teamName}.`;
+    case "PENALTY": return `Penalty pour ${teamName} !`;
+    case "KICKOFF": return `Coup d'envoi pour ${teamName}.`;
+  }
+}
+
+function selectRestartTaker(
+  state: MatchState,
+  type: RestartType,
+  teamIndex: TeamIndex,
+  spot: Vec2,
+): RuntimePlayer | undefined {
+  const team = state.teams[teamIndex];
+  const active = team.players.filter((player) => player.active && !player.redCard && !player.injured);
+  if (type === "GOAL_KICK") {
+    return findActiveBySlot(team, "GK") ?? active[0];
+  }
+  if (type === "PENALTY") {
+    return [...active]
+      .filter((player) => player.assignedPosition !== "GK")
+      .sort((a, b) => b.card.stats.shooting - a.card.stats.shooting)[0];
+  }
+
+  const outfield = active.filter((player) => player.assignedPosition !== "GK");
+  if (type === "FREE_KICK") {
+    return [...outfield]
+      .sort((a, b) => {
+        const da = distanceBetween(a.pos, spot) - (a.card.stats.shooting + a.card.stats.passing) / 2500;
+        const db = distanceBetween(b.pos, spot) - (b.card.stats.shooting + b.card.stats.passing) / 2500;
+        return da - db;
+      })[0];
+  }
+  return [...outfield].sort((a, b) => distanceBetween(a.pos, spot) - distanceBetween(b.pos, spot))[0];
+}
+
+function selectRestartPassTarget(
+  state: MatchState,
+  restart: RestartState,
+  taker: RuntimePlayer,
+): RuntimePlayer | undefined {
+  const teammates = state.teams[restart.teamIndex].players.filter(
+    (player) => player.active && player.runtimeId !== taker.runtimeId,
+  );
+
+  if (restart.type === "CORNER") {
+    return [...teammates]
+      .filter((player) => player.assignedPosition !== "GK")
+      .sort((a, b) => {
+        const aScore = a.card.stats.physical * 0.55 + a.card.stats.shooting * 0.45;
+        const bScore = b.card.stats.physical * 0.55 + b.card.stats.shooting * 0.45;
+        return bScore - aScore;
+      })[0];
+  }
+
+  if (restart.type === "GOAL_KICK") {
+    const preferred = teammates.filter((player) => ["CB", "LB", "RB", "CDM"].includes(player.assignedPosition ?? ""));
+    return state.rng.pick(preferred.length > 0 ? preferred : teammates);
+  }
+
+  return [...teammates]
+    .filter((player) => player.assignedPosition !== "GK")
+    .sort((a, b) => distanceBetween(a.pos, restart.spot) - distanceBetween(b.pos, restart.spot))[0];
+}
+
+function selectWallPlayers(
+  state: MatchState,
+  defendingTeamIndex: TeamIndex,
+  spot: Vec2,
+): string[] {
+  const team = state.teams[defendingTeamIndex];
+  const count = clamp(
+    Math.round(3 + (1 - distanceBetween(spot, opponentGoal(state.teams[otherTeamIndex(defendingTeamIndex)].side))) * 2),
+    MATCH_CONFIG.setPieces.wallMinPlayers,
+    MATCH_CONFIG.setPieces.wallMaxPlayers,
+  );
+  return team.players
+    .filter((player) => player.active && player.assignedPosition !== "GK")
+    .sort((a, b) => distanceBetween(a.pos, spot) - distanceBetween(b.pos, spot))
+    .slice(0, count)
+    .map((player) => player.runtimeId);
+}
+
+function positionPlayersForRestart(
+  state: MatchState,
+  restart: RestartState,
+): void {
+  // Un arrêt de jeu autorise un repositionnement complet : on repart d'une
+  // structure propre avant d'appliquer les positions spécifiques du coup de pied arrêté.
+  for (const team of state.teams) {
+    for (const player of team.players) {
+      if (!player.active || !player.slotId) continue;
+      const anchor = anchorForSide(getSlot(player.slotId).anchor, player.side);
+      player.pos = { ...anchor };
+      player.target = { ...anchor };
+      player.runTarget = null;
+      player.runUntil = 0;
+    }
+  }
+
+  const taker = getPlayer(state, restart.takerId);
+  if (taker) {
+    taker.pos = { ...restart.spot };
+    taker.target = { ...restart.spot };
+  }
+
+  const attackingTeam = state.teams[restart.teamIndex];
+  const defendingTeam = state.teams[otherTeamIndex(restart.teamIndex)];
+  const direction = attackDirection(attackingTeam.side);
+  const targetGoal = opponentGoal(attackingTeam.side);
+
+  if (restart.type === "KICKOFF") {
+    const striker = findActiveBySlot(attackingTeam, "ST") ?? taker;
+    if (striker) {
+      striker.pos = { x: 0.5 - direction * 0.012, y: 0.5 };
+      striker.target = { ...striker.pos };
+      restart.takerId = striker.runtimeId;
+    }
+    return;
+  }
+
+  if (restart.type === "CORNER") {
+    const attackers = attackingTeam.players.filter((player) => player.active && player.runtimeId !== restart.takerId && player.assignedPosition !== "GK");
+    attackers.forEach((player, index) => {
+      const progress = 0.86 + (index % 3) * 0.025;
+      player.pos = {
+        x: fromTeamProgress(progress, attackingTeam.side),
+        y: clamp(0.36 + (index % 5) * 0.07, 0.30, 0.70),
+      };
+      player.target = { ...player.pos };
+    });
+    defendingTeam.players.filter((player) => player.active && player.assignedPosition !== "GK").forEach((player, index) => {
+      player.pos = {
+        x: fromTeamProgress(0.88 - (index % 2) * 0.025, attackingTeam.side),
+        y: clamp(0.34 + (index % 6) * 0.065, 0.28, 0.72),
+      };
+      player.target = { ...player.pos };
+    });
+  }
+
+  if (restart.type === "PENALTY") {
+    const defendingKeeper = findActiveBySlot(defendingTeam, "GK");
+    if (defendingKeeper) {
+      defendingKeeper.pos = { x: targetGoal.x, y: 0.5 };
+      defendingKeeper.target = { ...defendingKeeper.pos };
+    }
+    const outsideProgress = 0.78;
+    [...attackingTeam.players, ...defendingTeam.players]
+      .filter((player) => player.active && player.runtimeId !== restart.takerId && player.runtimeId !== defendingKeeper?.runtimeId)
+      .forEach((player, index) => {
+        player.pos = {
+          x: fromTeamProgress(outsideProgress - (index % 2) * 0.025, attackingTeam.side),
+          y: clamp(0.28 + (index % 8) * 0.065, 0.24, 0.76),
+        };
+        player.target = { ...player.pos };
+      });
+  }
+
+  if (restart.type === "FREE_KICK" && restart.wallPlayerIds.length > 0) {
+    const toGoal = normalizeVector({
+      x: targetGoal.x - restart.spot.x,
+      y: targetGoal.y - restart.spot.y,
+    });
+    const perpendicular = { x: -toGoal.y, y: toGoal.x };
+    restart.wallPlayerIds.forEach((runtimeId, index) => {
+      const player = getPlayer(state, runtimeId);
+      if (!player) return;
+      const offset = (index - (restart.wallPlayerIds.length - 1) / 2) * 0.022;
+      player.pos = {
+        x: clamp(restart.spot.x + toGoal.x * MATCH_CONFIG.setPieces.wallDistance + perpendicular.x * offset, 0.02, 0.98),
+        y: clamp(restart.spot.y + toGoal.y * MATCH_CONFIG.setPieces.wallDistance + perpendicular.y * offset, 0.03, 0.97),
+      };
+      player.target = { ...player.pos };
+    });
+  }
+}
+
+function isInsideOwnPenaltyArea(pos: Vec2, defendingSide: TeamSide): boolean {
+  const progress = toTeamProgress(pos.x, defendingSide);
+  return (
+    progress <= MATCH_CONFIG.setPieces.penaltyAreaDepth &&
+    Math.abs(pos.y - 0.5) <= MATCH_CONFIG.setPieces.penaltyAreaHalfWidth
+  );
+}
+
+function penaltySpotForAttack(attackingSide: TeamSide): Vec2 {
+  return {
+    x: attackingSide === "HOME"
+      ? 1 - MATCH_CONFIG.setPieces.penaltySpotDistanceFromGoal
+      : MATCH_CONFIG.setPieces.penaltySpotDistanceFromGoal,
+    y: 0.5,
+  };
+}
+
+function lineYAtX(from: Vec2, to: Vec2, x: number): number {
+  const dx = to.x - from.x;
+  if (Math.abs(dx) < 1e-9) return to.y;
+  const t = (x - from.x) / dx;
+  return from.y + (to.y - from.y) * t;
+}
+
+function logicalExtraToDisplayedMinutes(
+  state: MatchState,
+  logicalSeconds: number,
+): number {
+  return (logicalSeconds / state.periodRegulationDuration) * 45;
+}
+
+function currentClockLabel(state: MatchState): string {
+  const regulation = state.periodRegulationDuration;
+  const elapsed = state.periodElapsed;
+  const baseMinute = state.period === 1 ? 0 : 45;
+
+  if (elapsed <= regulation) {
+    const seconds = baseMinute * 60 + (elapsed / regulation) * 45 * 60;
+    const minute = Math.floor(seconds / 60);
+    const second = Math.floor(seconds % 60);
+    return `${minute}:${String(second).padStart(2, "0")}`;
+  }
+
+  const addedSeconds = ((elapsed - regulation) / regulation) * 45 * 60;
+  const addedMinute = Math.floor(addedSeconds / 60) + 1;
+  const marker = state.period === 1 ? 45 : 90;
+  return `${marker}+${addedMinute}`;
+}
+
 function resetForKickoff(
   state: MatchState,
   kickoffTeamIndex: TeamIndex,
@@ -2214,12 +2919,17 @@ function resetForKickoff(
   };
   owner.target = { ...owner.pos };
 
-  setControlledBall(state, owner, { x: 0.5, y: 0.5 });
+  setControlledBall(state, owner);
 }
 
 function captureFrame(state: MatchState): void {
   const frame: ReplayFrame = {
     t: round(state.t, 3),
+    clock: {
+      period: state.period,
+      periodElapsed: round(state.periodElapsed, 3),
+      regulationPeriodDuration: state.periodRegulationDuration,
+    },
     ball: {
       x: round(state.ball.pos.x),
       y: round(state.ball.pos.y),
@@ -2227,6 +2937,7 @@ function captureFrame(state: MatchState): void {
         state.ball.mode === "CONTROLLED"
           ? state.ball.ownerId
           : null,
+      dead: state.ball.mode === "DEAD",
     },
     players: state.allPlayers.map((player) => ({
       id: player.runtimeId,
@@ -2253,19 +2964,16 @@ function emit(
 
   state.events.push({
     t: round(state.t, 3),
+    clockLabel: event.clockLabel ?? currentClockLabel(state),
     ...event,
   });
 }
 
 function updatePossessionCounter(state: MatchState): void {
-  if (state.ball.mode !== "CONTROLLED") {
+  if (state.ball.mode === "DEAD") {
     return;
   }
-
-  const owner = getPlayer(state, state.ball.ownerId);
-  if (owner) {
-    state.teams[owner.teamIndex].stats.possessionTicks += 1;
-  }
+  state.teams[state.possessionTeamIndex].stats.possessionTicks += 1;
 }
 
 function buildReplayMetadata(
@@ -2785,5 +3493,12 @@ function withoutPossessionTicks(
     redCards: stats.redCards,
     offsides: stats.offsides,
     substitutions: stats.substitutions,
+    throwIns: stats.throwIns,
+    corners: stats.corners,
+    goalKicks: stats.goalKicks,
+    freeKicks: stats.freeKicks,
+    penalties: stats.penalties,
+    goalkeeperSaves: stats.goalkeeperSaves,
+    goalsFromSetPieces: stats.goalsFromSetPieces,
   };
 }
