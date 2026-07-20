@@ -12,6 +12,7 @@ import type {
   MatchEvent,
   MatchReplay,
   MatchSimulationOutput,
+  MatchSpatialAnalytics,
   PlayerCard,
   Position,
   ReplayFrame,
@@ -19,6 +20,7 @@ import type {
   Role,
   TeamMatchStats,
   TeamSelection,
+  TeamSpatialAnalytics,
   TeamSide,
   Vec2,
 } from "./types";
@@ -54,6 +56,7 @@ type RuntimeTeam = {
   selection: TeamSelection;
   players: RuntimePlayer[];
   substitutionsUsed: number;
+  lastSubstitutionDisplayedMinute: number;
   score: number;
   stats: Omit<TeamMatchStats, "possession" | "averageStarterEnergy"> & {
     possessionTicks: number;
@@ -97,6 +100,32 @@ type LooseBall = {
 
 type RuntimeBall = ControlledBall | TransitBall | LooseBall;
 
+type SpatialTeamAccumulator = {
+  samples: number;
+  allPlayersHeatmap: number[];
+  positionHeatmaps: Partial<Record<Position, number[]>>;
+  blockCenterProgressSum: number;
+  blockCenterProgressSquaredSum: number;
+  blockCenterMin: number;
+  blockCenterMax: number;
+  blockDepthSum: number;
+  blockWidthSum: number;
+  playersInAttackingHalfSum: number;
+  defensiveLineProgressSum: number;
+  possessionSamples: number;
+  outOfPossessionSamples: number;
+  possessionBlockCenterSum: number;
+  outOfPossessionBlockCenterSum: number;
+  possessionWidthSum: number;
+  outOfPossessionWidthSum: number;
+};
+
+type SpatialAccumulator = {
+  columns: number;
+  rows: number;
+  teams: [SpatialTeamAccumulator, SpatialTeamAccumulator];
+};
+
 type MatchState = {
   t: number;
   logicalDuration: number;
@@ -107,10 +136,15 @@ type MatchState = {
   frames: ReplayFrame[];
   nextDecisionAt: number;
   nextReplayAt: number;
+  nextSpatialAt: number;
   halftimeEmitted: boolean;
   rng: SeededRng;
   controlStartedAt: number;
   recordReplay: boolean;
+  recordSpatialAnalytics: boolean;
+  spatial: SpatialAccumulator;
+  possessionTeamIndex: TeamIndex;
+  possessionChangedAt: number;
   notifications: MatchSimulationOutput["notifications"];
 };
 
@@ -128,10 +162,14 @@ const EMPTY_STATS = () => ({
   dribbles: 0,
   progressiveRuns: 0,
   duelsWon: 0,
+  transitionShots: 0,
+  possessionRegains: 0,
   tackles: 0,
   fouls: 0,
   yellowCards: 0,
   redCards: 0,
+  offsides: 0,
+  substitutions: 0,
   possessionTicks: 0,
 });
 
@@ -142,6 +180,7 @@ export function simulateMatch(params: {
   seed: string;
   logicalSeconds?: number;
   recordReplay?: boolean;
+  recordSpatialAnalytics?: boolean;
 }): MatchSimulationOutput {
   const logicalDuration = clamp(
     params.logicalSeconds ?? MATCH_CONFIG.logicalSeconds,
@@ -188,10 +227,15 @@ export function simulateMatch(params: {
     frames: [],
     nextDecisionAt: 0,
     nextReplayAt: MATCH_CONFIG.replayFrameInterval,
+    nextSpatialAt: 0,
     halftimeEmitted: false,
     rng,
     controlStartedAt: 0,
     recordReplay: params.recordReplay ?? true,
+    recordSpatialAnalytics: params.recordSpatialAnalytics ?? false,
+    spatial: createSpatialAccumulator(),
+    possessionTeamIndex: home.index,
+    possessionChangedAt: 0,
     notifications: {
       injuries: [],
       suspensions: [],
@@ -235,6 +279,14 @@ export function simulateMatch(params: {
     updatePossessionCounter(state);
     evaluateAutomaticSubstitutions(state);
 
+    if (
+      state.recordSpatialAnalytics &&
+      state.t + 1e-9 >= state.nextSpatialAt
+    ) {
+      captureSpatialSample(state);
+      state.nextSpatialAt += MATCH_CONFIG.spatialSampleInterval;
+    }
+
     state.t += dt;
 
     if (
@@ -275,6 +327,10 @@ export function simulateMatch(params: {
     possession: round(100 - homeStats.possession, 1),
   };
 
+  const analytics = state.recordSpatialAnalytics
+    ? finalizeSpatialAnalytics(state.spatial)
+    : undefined;
+
   const replay: MatchReplay = {
     engineVersion: ENGINE_VERSION,
     seed: params.seed,
@@ -300,6 +356,7 @@ export function simulateMatch(params: {
       away: awayStats,
     },
     notifications: state.notifications,
+    analytics,
     replay,
   };
 }
@@ -383,6 +440,7 @@ function createRuntimeTeam(
     selection,
     players,
     substitutionsUsed: 0,
+    lastSubstitutionDisplayedMinute: -999,
     score: 0,
     stats: EMPTY_STATS(),
   };
@@ -471,11 +529,11 @@ function chooseBallAction(
   const shotQuality = estimateShotQuality(owner.pos, owner.side);
   const controlAge = state.t - state.controlStartedAt;
 
-  if (shotQuality > 0.09) {
+  if (shotQuality > 0.055) {
     candidates.push({
       kind: "SHOT",
       utility:
-        shotQuality * 0.78 +
+        shotQuality * 1.00 +
         (owner.role === "OFFENSIVE" ? 0.01 : 0),
     });
   }
@@ -515,6 +573,15 @@ function chooseBallAction(
     }
 
     if (
+      MATCH_CONFIG.offsides.enabled &&
+      isPlayerOffside(state, owner, teammate)
+    ) {
+      // Un joueur intelligent évite presque toujours cette option via l'utility.
+      // La pénalité n'est pas infinie : une mauvaise décision peut encore arriver.
+      utility -= 0.85;
+    }
+
+    if (
       teammate.runTarget &&
       teammate.runUntil > state.t
     ) {
@@ -547,7 +614,7 @@ function chooseBallAction(
 
   candidates.push({
     kind: "HOLD",
-    utility: 0.18 + (owner.role === "DEFENSIVE" ? 0.08 : 0),
+    utility: 0.18 + (owner.role === "DEFENSIVE" ? 0.04 : 0),
   });
 
   const temperature = decisionTemperature(stats.intelligence);
@@ -598,6 +665,33 @@ function startPass(
   }
 
   const team = state.teams[passer.teamIndex];
+
+  if (
+    MATCH_CONFIG.offsides.enabled &&
+    isPlayerOffside(state, passer, receiver)
+  ) {
+    team.stats.passesAttempted += 1;
+    team.stats.offsides += 1;
+    const defendingTeam = state.teams[otherTeamIndex(passer.teamIndex)];
+    const restartPlayer =
+      nearestPlayerToPoint(
+        receiver.pos,
+        defendingTeam.players.filter((player) => player.active),
+      ) ?? findActiveBySlot(defendingTeam, "GK");
+
+    emit(state, {
+      type: "OFFSIDE",
+      team: passer.side,
+      playerId: receiver.card.playerId,
+      runtimeId: receiver.runtimeId,
+      message: `${receiver.card.shortName} est signalé hors-jeu.`,
+    });
+
+    if (restartPlayer) {
+      setControlledBall(state, restartPlayer, { ...receiver.pos });
+    }
+    return;
+  }
   const opponents = state.teams[otherTeamIndex(passer.teamIndex)].players.filter(
     (player) => player.active,
   );
@@ -790,6 +884,10 @@ function startShot(state: MatchState, shooter: RuntimePlayer): void {
   }
 
   attackingTeam.stats.shots += 1;
+  if (state.t - state.possessionChangedAt <=
+    MATCH_CONFIG.possession.transitionShotWindowSeconds) {
+    attackingTeam.stats.transitionShots += 1;
+  }
 
   const targetY =
     shotResult === "MISS"
@@ -1098,10 +1196,10 @@ function attemptDefensiveDuel(
     0.24 +
       0.28 * (defenderStats.physical / 100) +
       0.16 * (defenderStats.intelligence / 100) +
-      0.04 * (defenderStats.speed / 100) -
+      0.03 * (defenderStats.speed / 100) -
       0.22 * (ownerStats.technique / 100) -
       0.16 * (ownerStats.physical / 100) -
-      0.08 * (ownerStats.speed / 100),
+      0.05 * (ownerStats.speed / 100),
     0.08,
     0.62,
   );
@@ -1145,8 +1243,9 @@ function attemptDefensiveDuel(
     return true;
   }
 
-  const aggression = defender.card.stats.physical / 100;
-  const foulProbability = 0.035 + 0.055 * aggression;
+  // La stat Physique ne doit pas rendre mécaniquement un joueur plus fautif.
+  // L'agressivité détaillée du dataset pourra être réintroduite plus tard.
+  const foulProbability = 0.04;
   if (state.rng.chance(foulProbability)) {
     handleFoul(state, defender, owner);
     return true;
@@ -1493,6 +1592,12 @@ function setControlledBall(
   player: RuntimePlayer,
   pos: Vec2 = player.pos,
 ): void {
+  if (state.possessionTeamIndex !== player.teamIndex) {
+    state.possessionTeamIndex = player.teamIndex;
+    state.possessionChangedAt = state.t;
+    state.teams[player.teamIndex].stats.possessionRegains += 1;
+  }
+
   state.ball = {
     mode: "CONTROLLED",
     ownerId: player.runtimeId,
@@ -1610,7 +1715,7 @@ function updateOffBallRuns(state: MatchState): void {
           ? 0.10
           : 0.07;
 
-      player.runTarget = {
+      const rawRunTarget = {
         x: clamp(
           player.pos.x + direction * depth,
           0.05,
@@ -1623,6 +1728,16 @@ function updateOffBallRuns(state: MatchState): void {
           0.94,
         ),
       };
+
+      player.runTarget = MATCH_CONFIG.offsides.enabled
+        ? adjustRunTargetForOffside(
+            state,
+            owner,
+            player,
+            rawRunTarget,
+            stats.intelligence,
+          )
+        : rawRunTarget;
       player.runUntil =
         state.t +
         state.rng.between(
@@ -1640,17 +1755,60 @@ function updatePlayerTargets(state: MatchState): void {
     state.ball.mode === "CONTROLLED"
       ? getPlayer(state, state.ball.ownerId)
       : undefined;
+  const ballPosition = state.ball.pos;
 
   for (const team of state.teams) {
-    const hasPossession = owner?.teamIndex === team.index;
+    const hasPossession = state.possessionTeamIndex === team.index;
     const direction = attackDirection(team.side);
+    const ballProgress = toTeamProgress(ballPosition.x, team.side);
 
-    const blockShift =
+    const tacticAdvance =
       team.selection.tactics?.blockHeight === "HIGH"
-        ? 0.05
+        ? 0.055
         : team.selection.tactics?.blockHeight === "LOW"
-          ? -0.04
+          ? -0.055
           : 0;
+
+    const transitionBlend = clamp(
+      (state.t - state.possessionChangedAt) / 3.5,
+    );
+    const phaseAdvance = hasPossession
+      ? lerp(
+          MATCH_CONFIG.block.defenseBaseRetreat,
+          MATCH_CONFIG.block.attackBaseAdvance,
+          transitionBlend,
+        )
+      : lerp(
+          MATCH_CONFIG.block.attackBaseAdvance,
+          MATCH_CONFIG.block.defenseBaseRetreat,
+          transitionBlend,
+        );
+    const ballFollow =
+      (ballProgress - 0.5) *
+      (hasPossession
+        ? MATCH_CONFIG.block.ballFollowAttack
+        : MATCH_CONFIG.block.ballFollowDefense);
+    const blockAdvance = clamp(
+      phaseAdvance + tacticAdvance + ballFollow,
+      -0.19,
+      0.22,
+    );
+
+    const buildUp = team.selection.tactics?.buildUp ?? "BALANCED";
+    const widthTacticModifier =
+      buildUp === "SHORT" ? -0.05 : buildUp === "DIRECT" ? 0.04 : 0;
+    const widthScale =
+      (hasPossession
+        ? MATCH_CONFIG.block.attackWidth
+        : MATCH_CONFIG.block.defenseWidth) + widthTacticModifier;
+    const depthScale = hasPossession
+      ? MATCH_CONFIG.block.attackDepth
+      : MATCH_CONFIG.block.defenseDepth;
+    const lateralShift =
+      (ballPosition.y - 0.5) *
+      (hasPossession
+        ? MATCH_CONFIG.block.lateralBallFollowAttack
+        : MATCH_CONFIG.block.lateralBallFollowDefense);
 
     const activePlayers = team.players.filter(
       (player) => player.active && player.slotId,
@@ -1659,20 +1817,43 @@ function updatePlayerTargets(state: MatchState): void {
     for (const player of activePlayers) {
       const slot = getSlot(player.slotId!);
       const anchor = anchorForSide(slot.anchor, player.side);
+      const anchorProgress = toTeamProgress(anchor.x, player.side);
       const roleShift =
         player.role === "OFFENSIVE"
-          ? 0.020
+          ? 0.012
           : player.role === "DEFENSIVE"
-            ? -0.020
+            ? -0.012
             : 0;
 
-      const possessionShift = hasPossession ? 0.055 : -0.025;
-      const xShift =
-        direction * (possessionShift + roleShift + blockShift);
+      const lineFollowFactor =
+        player.assignedPosition === "GK"
+          ? 0.34
+          : player.assignedPosition === "CB" ||
+              player.assignedPosition === "LB" ||
+              player.assignedPosition === "RB"
+            ? 0.82
+            : player.assignedPosition === "ST" ||
+                player.assignedPosition === "LW" ||
+                player.assignedPosition === "RW"
+              ? 1.08
+              : 1;
+
+      const targetProgress = clamp(
+        MATCH_CONFIG.block.baseCenterProgress +
+          (anchorProgress - MATCH_CONFIG.block.baseCenterProgress) * depthScale +
+          blockAdvance * lineFollowFactor +
+          roleShift,
+        0.025,
+        0.975,
+      );
 
       let target: Vec2 = {
-        x: clamp(anchor.x + xShift, 0.025, 0.975),
-        y: anchor.y,
+        x: fromTeamProgress(targetProgress, player.side),
+        y: clamp(
+          0.5 + (anchor.y - 0.5) * widthScale + lateralShift,
+          0.035,
+          0.965,
+        ),
       };
 
       if (
@@ -1682,23 +1863,13 @@ function updatePlayerTargets(state: MatchState): void {
         player.runUntil > state.t
       ) {
         target = { ...player.runTarget };
-      } else if (owner) {
-        const ballAttraction =
-          player.role === "PRESSING"
-            ? 0.17
-            : hasPossession
-              ? 0.05
-              : 0.13;
-
-        target = {
-          x: lerp(target.x, owner.pos.x, ballAttraction),
-          y: lerp(target.y, owner.pos.y, ballAttraction),
-        };
       }
 
       player.target = target;
     }
 
+    // Le pressing est une déformation locale du bloc, pas une téléportation de
+    // toute la structure vers le porteur.
     if (owner && owner.teamIndex !== team.index) {
       const defenders = activePlayers
         .filter(
@@ -1726,7 +1897,11 @@ function updatePlayerTargets(state: MatchState): void {
             0.02,
             0.98,
           ),
-          y: clamp(owner.pos.y + (index === 0 ? 0 : 0.025), 0.03, 0.97),
+          y: clamp(
+            owner.pos.y + (index === 0 ? 0 : 0.025),
+            0.03,
+            0.97,
+          ),
         };
       });
     }
@@ -1785,6 +1960,16 @@ function updateMovement(state: MatchState, dt: number): void {
       speedPerSecond *= MATCH_CONFIG.duels.stunnedSpeedMultiplier;
     }
 
+    const isMakingRun =
+      Boolean(player.runTarget) && player.runUntil > state.t;
+    if (
+      !controlled &&
+      !isMakingRun &&
+      state.ball.mode !== "LOOSE"
+    ) {
+      speedPerSecond *= MATCH_CONFIG.movement.shapeRepositionMultiplier;
+    }
+
     if (controlled) {
       const controlRatio = clamp(stats.technique / 100);
       const multiplier =
@@ -1824,9 +2009,7 @@ function evaluateAutomaticSubstitutions(state: MatchState): void {
   const displayedMinute =
     (state.t / state.logicalDuration) * MATCH_CONFIG.displayedMinutes;
 
-  if (
-    displayedMinute < MATCH_CONFIG.fatigue.autoSubDisplayedMinute
-  ) {
+  if (displayedMinute < MATCH_CONFIG.substitutions.minimumDisplayedMinute) {
     return;
   }
 
@@ -1835,22 +2018,60 @@ function evaluateAutomaticSubstitutions(state: MatchState): void {
       continue;
     }
 
-    const candidate = team.players
+    if (
+      displayedMinute - team.lastSubstitutionDisplayedMinute <
+      MATCH_CONFIG.substitutions.cooldownDisplayedMinutes
+    ) {
+      continue;
+    }
+
+    const plannedTarget = MATCH_CONFIG.substitutions.plannedWindows.filter(
+      (minute) => displayedMinute >= minute,
+    ).length;
+    const plannedRotationDue = team.substitutionsUsed < plannedTarget;
+
+    const candidates = team.players
       .filter(
         (player) =>
           player.active &&
           !player.injured &&
           !player.redCard &&
-          player.assignedPosition !== "GK" &&
-          player.energy <
-            MATCH_CONFIG.fatigue.autoSubEnergyThreshold,
+          player.assignedPosition !== "GK",
       )
-      .sort((a, b) => a.energy - b.energy)[0];
+      .sort((a, b) => substitutionPriority(b) - substitutionPriority(a));
 
-    if (candidate) {
-      substitutePlayer(state, candidate, "fatigue");
+    const candidate = candidates[0];
+    if (!candidate) {
+      continue;
     }
+
+    const emergencyFatigue =
+      candidate.energy < MATCH_CONFIG.substitutions.emergencyEnergyThreshold;
+    const usefulPlannedRotation =
+      plannedRotationDue &&
+      (candidate.energy < MATCH_CONFIG.substitutions.plannedEnergyThreshold ||
+        candidate.yellowCards > 0 ||
+        displayedMinute >= 78);
+
+    if (!emergencyFatigue && !usefulPlannedRotation) {
+      continue;
+    }
+
+    const reason = candidate.yellowCards > 0
+      ? "carton"
+      : emergencyFatigue
+        ? "fatigue"
+        : "rotation";
+
+    substitutePlayer(state, candidate, reason);
   }
+}
+
+function substitutionPriority(player: RuntimePlayer): number {
+  const fatigueScore = 100 - player.energy;
+  const yellowScore = player.yellowCards > 0 ? 18 : 0;
+  const roleScore = player.role === "PRESSING" ? 5 : 0;
+  return fatigueScore + yellowScore + roleScore;
 }
 
 function substitutePlayer(
@@ -1912,6 +2133,9 @@ function substitutePlayer(
   incoming.energy = 100;
 
   team.substitutionsUsed += 1;
+  team.stats.substitutions += 1;
+  team.lastSubstitutionDisplayedMinute =
+    (state.t / state.logicalDuration) * MATCH_CONFIG.displayedMinutes;
   recomputeSynergy(team);
 
   if (
@@ -2150,6 +2374,295 @@ function nearestPlayerToPoint(
   }, undefined);
 }
 
+
+function toTeamProgress(worldX: number, side: TeamSide): number {
+  return side === "HOME" ? worldX : 1 - worldX;
+}
+
+function fromTeamProgress(progress: number, side: TeamSide): number {
+  return side === "HOME" ? progress : 1 - progress;
+}
+
+function secondLastOpponentProgress(
+  state: MatchState,
+  attackingTeamIndex: TeamIndex,
+): number {
+  const attackingSide = state.teams[attackingTeamIndex].side;
+  const opponents = state.teams[otherTeamIndex(attackingTeamIndex)].players
+    .filter((player) => player.active && !player.redCard)
+    .map((player) => toTeamProgress(player.pos.x, attackingSide))
+    .sort((a, b) => b - a);
+
+  return opponents.length >= 2 ? opponents[1] : 1;
+}
+
+function isPlayerOffside(
+  state: MatchState,
+  passer: RuntimePlayer,
+  receiver: RuntimePlayer,
+): boolean {
+  if (passer.teamIndex !== receiver.teamIndex) {
+    return false;
+  }
+
+  const receiverProgress = toTeamProgress(receiver.pos.x, passer.side);
+  if (receiverProgress <= 0.5) {
+    return false;
+  }
+
+  const ballProgress = toTeamProgress(passer.pos.x, passer.side);
+  const secondLastDefender = secondLastOpponentProgress(
+    state,
+    passer.teamIndex,
+  );
+  const offsideLine = Math.max(ballProgress, secondLastDefender);
+
+  return (
+    receiverProgress >
+    offsideLine + MATCH_CONFIG.offsides.lineBuffer
+  );
+}
+
+function adjustRunTargetForOffside(
+  state: MatchState,
+  owner: RuntimePlayer,
+  runner: RuntimePlayer,
+  target: Vec2,
+  intelligence: number,
+): Vec2 {
+  if (owner.teamIndex !== runner.teamIndex) {
+    return target;
+  }
+
+  const targetProgress = toTeamProgress(target.x, runner.side);
+  if (targetProgress <= 0.5) {
+    return target;
+  }
+
+  const ballProgress = toTeamProgress(owner.pos.x, runner.side);
+  const secondLastDefender = secondLastOpponentProgress(
+    state,
+    runner.teamIndex,
+  );
+  const legalLine = Math.max(ballProgress, secondLastDefender);
+  const intelligenceFactor = 1 - clamp(intelligence / 100);
+  const allowedOvershoot =
+    MATCH_CONFIG.offsides.maxLowIntelligenceOvershoot *
+    intelligenceFactor *
+    state.rng.next();
+  const maxProgress = Math.max(
+    0.5,
+    legalLine - MATCH_CONFIG.offsides.lineBuffer + allowedOvershoot,
+  );
+
+  if (targetProgress <= maxProgress) {
+    return target;
+  }
+
+  return {
+    ...target,
+    x: fromTeamProgress(maxProgress, runner.side),
+  };
+}
+
+function createSpatialAccumulator(): SpatialAccumulator {
+  return {
+    columns: MATCH_CONFIG.analytics.heatmapColumns,
+    rows: MATCH_CONFIG.analytics.heatmapRows,
+    teams: [createSpatialTeamAccumulator(), createSpatialTeamAccumulator()],
+  };
+}
+
+function createSpatialTeamAccumulator(): SpatialTeamAccumulator {
+  const cells =
+    MATCH_CONFIG.analytics.heatmapColumns *
+    MATCH_CONFIG.analytics.heatmapRows;
+  const positions: Position[] = [
+    "GK",
+    "LB",
+    "CB",
+    "RB",
+    "CDM",
+    "CM",
+    "CAM",
+    "LM",
+    "RM",
+    "LW",
+    "RW",
+    "ST",
+  ];
+
+  return {
+    samples: 0,
+    allPlayersHeatmap: Array(cells).fill(0),
+    positionHeatmaps: Object.fromEntries(
+      positions.map((position) => [position, Array(cells).fill(0)]),
+    ) as Partial<Record<Position, number[]>>,
+    blockCenterProgressSum: 0,
+    blockCenterProgressSquaredSum: 0,
+    blockCenterMin: 1,
+    blockCenterMax: 0,
+    blockDepthSum: 0,
+    blockWidthSum: 0,
+    playersInAttackingHalfSum: 0,
+    defensiveLineProgressSum: 0,
+    possessionSamples: 0,
+    outOfPossessionSamples: 0,
+    possessionBlockCenterSum: 0,
+    outOfPossessionBlockCenterSum: 0,
+    possessionWidthSum: 0,
+    outOfPossessionWidthSum: 0,
+  };
+}
+
+function captureSpatialSample(state: MatchState): void {
+  const { columns, rows } = state.spatial;
+
+  for (const team of state.teams) {
+    const accumulator = state.spatial.teams[team.index];
+    const active = team.players.filter(
+      (player) => player.active && player.assignedPosition,
+    );
+    const outfield = active.filter(
+      (player) => player.assignedPosition !== "GK",
+    );
+
+    accumulator.samples += 1;
+
+    for (const player of active) {
+      const progress = clamp(toTeamProgress(player.pos.x, team.side));
+      const lateral = clamp(player.pos.y);
+      const column = Math.min(
+        columns - 1,
+        Math.floor(lateral * columns),
+      );
+      const row = Math.min(rows - 1, Math.floor(progress * rows));
+      const index = row * columns + column;
+      accumulator.allPlayersHeatmap[index] += 1;
+      accumulator.positionHeatmaps[player.assignedPosition!]?.splice(
+        index,
+        1,
+        (accumulator.positionHeatmaps[player.assignedPosition!]![index] ?? 0) + 1,
+      );
+    }
+
+    if (outfield.length === 0) {
+      continue;
+    }
+
+    const progresses = outfield.map((player) =>
+      toTeamProgress(player.pos.x, team.side),
+    );
+    const laterals = outfield.map((player) => player.pos.y);
+    const blockCenter =
+      progresses.reduce((sum, value) => sum + value, 0) /
+      progresses.length;
+    const blockWidth = Math.max(...laterals) - Math.min(...laterals);
+    accumulator.blockCenterProgressSum += blockCenter;
+    accumulator.blockCenterProgressSquaredSum += blockCenter * blockCenter;
+    accumulator.blockCenterMin = Math.min(accumulator.blockCenterMin, blockCenter);
+    accumulator.blockCenterMax = Math.max(accumulator.blockCenterMax, blockCenter);
+    accumulator.blockDepthSum +=
+      Math.max(...progresses) - Math.min(...progresses);
+    accumulator.blockWidthSum += blockWidth;
+
+    if (state.possessionTeamIndex === team.index) {
+      accumulator.possessionSamples += 1;
+      accumulator.possessionBlockCenterSum += blockCenter;
+      accumulator.possessionWidthSum += blockWidth;
+    } else {
+      accumulator.outOfPossessionSamples += 1;
+      accumulator.outOfPossessionBlockCenterSum += blockCenter;
+      accumulator.outOfPossessionWidthSum += blockWidth;
+    }
+    accumulator.playersInAttackingHalfSum += progresses.filter(
+      (value) => value > 0.5,
+    ).length;
+
+    const defensiveLine = outfield.filter((player) =>
+      ["LB", "CB", "RB"].includes(player.assignedPosition!),
+    );
+    if (defensiveLine.length > 0) {
+      accumulator.defensiveLineProgressSum +=
+        defensiveLine.reduce(
+          (sum, player) =>
+            sum + toTeamProgress(player.pos.x, team.side),
+          0,
+        ) / defensiveLine.length;
+    }
+  }
+}
+
+function finalizeSpatialAnalytics(
+  spatial: SpatialAccumulator,
+): MatchSpatialAnalytics {
+  return {
+    columns: spatial.columns,
+    rows: spatial.rows,
+    home: finalizeSpatialTeam(spatial.teams[0]),
+    away: finalizeSpatialTeam(spatial.teams[1]),
+  };
+}
+
+function finalizeSpatialTeam(
+  accumulator: SpatialTeamAccumulator,
+): TeamSpatialAnalytics {
+  const divisor = Math.max(accumulator.samples, 1);
+  return {
+    samples: accumulator.samples,
+    allPlayersHeatmap: accumulator.allPlayersHeatmap,
+    positionHeatmaps: accumulator.positionHeatmaps,
+    averageBlockCenterProgress: round(
+      accumulator.blockCenterProgressSum / divisor,
+      3,
+    ),
+    averageBlockDepth: round(accumulator.blockDepthSum / divisor, 3),
+    averageBlockWidth: round(accumulator.blockWidthSum / divisor, 3),
+    averagePlayersInAttackingHalf: round(
+      accumulator.playersInAttackingHalfSum / divisor,
+      2,
+    ),
+    averageDefensiveLineProgress: round(
+      accumulator.defensiveLineProgressSum / divisor,
+      3,
+    ),
+    averageBlockCenterInPossession: round(
+      accumulator.possessionBlockCenterSum /
+        Math.max(accumulator.possessionSamples, 1),
+      3,
+    ),
+    averageBlockCenterOutOfPossession: round(
+      accumulator.outOfPossessionBlockCenterSum /
+        Math.max(accumulator.outOfPossessionSamples, 1),
+      3,
+    ),
+    averageWidthInPossession: round(
+      accumulator.possessionWidthSum /
+        Math.max(accumulator.possessionSamples, 1),
+      3,
+    ),
+    averageWidthOutOfPossession: round(
+      accumulator.outOfPossessionWidthSum /
+        Math.max(accumulator.outOfPossessionSamples, 1),
+      3,
+    ),
+    blockCenterRange: round(
+      Math.max(0, accumulator.blockCenterMax - accumulator.blockCenterMin),
+      3,
+    ),
+    blockCenterStdDev: round(
+      Math.sqrt(
+        Math.max(
+          0,
+          accumulator.blockCenterProgressSquaredSum / divisor -
+            (accumulator.blockCenterProgressSum / divisor) ** 2,
+        ),
+      ),
+      3,
+    ),
+  };
+}
+
 function findActiveBySlot(
   team: RuntimeTeam,
   slotId: string,
@@ -2264,9 +2777,13 @@ function withoutPossessionTicks(
     dribbles: stats.dribbles,
     progressiveRuns: stats.progressiveRuns,
     duelsWon: stats.duelsWon,
+    transitionShots: stats.transitionShots,
+    possessionRegains: stats.possessionRegains,
     tackles: stats.tackles,
     fouls: stats.fouls,
     yellowCards: stats.yellowCards,
     redCards: stats.redCards,
+    offsides: stats.offsides,
+    substitutions: stats.substitutions,
   };
 }

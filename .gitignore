@@ -3,7 +3,6 @@ fmvenv/
 test.ipynb
 .next/
 node_modules/
-package-lock.json
 
 # dependencies
 /node_modules

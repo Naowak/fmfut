@@ -5,6 +5,8 @@ import {
   type AnalyzedStat,
   type MonteCarloAggregate,
   type MonteCarloResponse,
+  type MonteCarloSpatialAggregate,
+  type SpatialTeamAggregate,
 } from "@/lib/analytics/types";
 import { simulateMatch } from "@/lib/game/engine";
 import {
@@ -13,7 +15,9 @@ import {
   DEFAULT_HOME_SELECTION,
 } from "@/lib/game/sample-teams";
 import type {
+  MatchSpatialAnalytics,
   PlayerCard,
+  Position,
   TeamMatchStats,
   TeamSelection,
 } from "@/lib/game/types";
@@ -32,6 +36,7 @@ type MatchSummary = {
   awayScore: number;
   home: TeamMatchStats;
   away: TeamMatchStats;
+  spatial?: MatchSpatialAnalytics;
 };
 
 export async function POST(request: Request) {
@@ -52,9 +57,11 @@ export async function POST(request: Request) {
       away: DEFAULT_AWAY_SELECTION,
       seedPrefix,
       runs,
+      recordSpatialAnalytics: true,
     });
 
     const baseline = aggregate(baselineMatches);
+    const spatial = aggregateSpatial(baselineMatches);
     const sensitivity = includeSensitivity
       ? ANALYZED_STATS.map((stat) =>
           runSensitivityExperiment({
@@ -82,22 +89,22 @@ export async function POST(request: Request) {
       runs,
       durationMs: Math.round(performance.now() - startedAt),
       baseline,
+      spatial,
       sensitivity,
       roleExperiment,
       notes: [
         "Les simulations analytiques tournent avec recordReplay=false : aucun frame Canvas n'est généré.",
+        "La baseline enregistre un échantillon spatial par seconde logique pour les heatmaps et les métriques de bloc.",
         "Les expériences de sensibilité utilisent exactement les mêmes seeds que la baseline.",
         "Le boost de +10 est appliqué à la stat testée sur le onze titulaire domicile uniquement.",
-        "La V0.3 mesure aussi l'énergie moyenne finale des titulaires pour calibrer la fatigue.",
-        "Les passes utilisent désormais une balle physique avec vélocité, décélération et contrôle à courte distance.",
+        "La V0.4 mesure les hors-jeu, les remplacements, le centre/largeur/profondeur du bloc et sa différence avec/sans possession.",
+        "Les heatmaps sont exprimées dans le repère de chaque équipe : notre but en bas, but adverse en haut.",
         "Le moteur ne possède encore qu'une formation 4-3-3 : la comparaison de formations sera ajoutée quand plusieurs formations existeront.",
       ],
     };
 
     return NextResponse.json(response, {
-      headers: {
-        "Cache-Control": "no-store",
-      },
+      headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {
     console.error(error);
@@ -119,6 +126,7 @@ function runBatch(params: {
   away: TeamSelection;
   seedPrefix: string;
   runs: number;
+  recordSpatialAnalytics?: boolean;
 }): MatchSummary[] {
   const matches: MatchSummary[] = [];
 
@@ -129,6 +137,7 @@ function runBatch(params: {
       players: params.players,
       seed: `${params.seedPrefix}-${index}`,
       recordReplay: false,
+      recordSpatialAnalytics: params.recordSpatialAnalytics ?? false,
     });
 
     matches.push({
@@ -136,6 +145,7 @@ function runBatch(params: {
       awayScore: result.result.awayScore,
       home: result.stats.home,
       away: result.stats.away,
+      spatial: result.analytics,
     });
   }
 
@@ -167,10 +177,7 @@ function runSensitivityExperiment(params: {
       );
     }
 
-    // ID synthétique : le boost doit s'appliquer uniquement au joueur
-    // de l'équipe domicile, même si le même player_id existe chez l'adversaire.
-    const boostedPlayerId =
-      -(originalPlayerId * 10 + statOffset);
+    const boostedPlayerId = -(originalPlayerId * 10 + statOffset);
 
     boostedPlayers.push({
       ...original,
@@ -218,8 +225,7 @@ function runSensitivityExperiment(params: {
       3,
     ),
     homeWinRateDelta: round(
-      boostedAggregate.homeWinRate -
-        baselineAggregate.homeWinRate,
+      boostedAggregate.homeWinRate - baselineAggregate.homeWinRate,
       2,
     ),
   };
@@ -253,11 +259,9 @@ function runRoleExperiment(params: {
   const neutral = aggregate(neutralMatches);
 
   const configuredAverageGoalDifference =
-    configured.averageHomeGoals -
-    configured.averageAwayGoals;
+    configured.averageHomeGoals - configured.averageAwayGoals;
   const neutralRolesAverageGoalDifference =
-    neutral.averageHomeGoals -
-    neutral.averageAwayGoals;
+    neutral.averageHomeGoals - neutral.averageAwayGoals;
 
   return {
     configuredAverageGoalDifference: round(
@@ -289,12 +293,22 @@ function aggregate(matches: MatchSummary[]): MonteCarloAggregate {
     awayShots: 0,
     homePasses: 0,
     awayPasses: 0,
+    homePassesCompleted: 0,
+    awayPassesCompleted: 0,
     homeDribbles: 0,
     awayDribbles: 0,
     homeProgressiveRuns: 0,
     awayProgressiveRuns: 0,
     homeDuelsWon: 0,
     awayDuelsWon: 0,
+    homeTransitionShots: 0,
+    awayTransitionShots: 0,
+    homePossessionRegains: 0,
+    awayPossessionRegains: 0,
+    homeOffsides: 0,
+    awayOffsides: 0,
+    homeSubstitutions: 0,
+    awaySubstitutions: 0,
     homePossession: 0,
     awayPossession: 0,
     homeStarterEnergy: 0,
@@ -302,13 +316,9 @@ function aggregate(matches: MatchSummary[]): MonteCarloAggregate {
   };
 
   for (const match of matches) {
-    if (match.homeScore > match.awayScore) {
-      homeWins += 1;
-    } else if (match.homeScore < match.awayScore) {
-      awayWins += 1;
-    } else {
-      draws += 1;
-    }
+    if (match.homeScore > match.awayScore) homeWins += 1;
+    else if (match.homeScore < match.awayScore) awayWins += 1;
+    else draws += 1;
 
     totals.homeGoals += match.homeScore;
     totals.awayGoals += match.awayScore;
@@ -316,12 +326,22 @@ function aggregate(matches: MatchSummary[]): MonteCarloAggregate {
     totals.awayShots += match.away.shots;
     totals.homePasses += match.home.passesAttempted;
     totals.awayPasses += match.away.passesAttempted;
+    totals.homePassesCompleted += match.home.passesCompleted;
+    totals.awayPassesCompleted += match.away.passesCompleted;
     totals.homeDribbles += match.home.dribbles;
     totals.awayDribbles += match.away.dribbles;
     totals.homeProgressiveRuns += match.home.progressiveRuns;
     totals.awayProgressiveRuns += match.away.progressiveRuns;
     totals.homeDuelsWon += match.home.duelsWon;
     totals.awayDuelsWon += match.away.duelsWon;
+    totals.homeTransitionShots += match.home.transitionShots;
+    totals.awayTransitionShots += match.away.transitionShots;
+    totals.homePossessionRegains += match.home.possessionRegains;
+    totals.awayPossessionRegains += match.away.possessionRegains;
+    totals.homeOffsides += match.home.offsides;
+    totals.awayOffsides += match.away.offsides;
+    totals.homeSubstitutions += match.home.substitutions;
+    totals.awaySubstitutions += match.away.substitutions;
     totals.homePossession += match.home.possession;
     totals.awayPossession += match.away.possession;
     totals.homeStarterEnergy += match.home.averageStarterEnergy;
@@ -338,31 +358,128 @@ function aggregate(matches: MatchSummary[]): MonteCarloAggregate {
     awayWinRate: round((awayWins / count) * 100, 2),
     averageHomeGoals: average(totals.homeGoals, count),
     averageAwayGoals: average(totals.awayGoals, count),
-    averageTotalGoals: average(
-      totals.homeGoals + totals.awayGoals,
-      count,
-    ),
+    averageTotalGoals: average(totals.homeGoals + totals.awayGoals, count),
     averageHomeShots: average(totals.homeShots, count),
     averageAwayShots: average(totals.awayShots, count),
     averageHomePasses: average(totals.homePasses, count),
     averageAwayPasses: average(totals.awayPasses, count),
     averageHomeDribbles: average(totals.homeDribbles, count),
     averageAwayDribbles: average(totals.awayDribbles, count),
-    averageHomeProgressiveRuns: average(
-      totals.homeProgressiveRuns,
-      count,
-    ),
-    averageAwayProgressiveRuns: average(
-      totals.awayProgressiveRuns,
-      count,
-    ),
+    averageHomeProgressiveRuns: average(totals.homeProgressiveRuns, count),
+    averageAwayProgressiveRuns: average(totals.awayProgressiveRuns, count),
     averageHomeDuelsWon: average(totals.homeDuelsWon, count),
     averageAwayDuelsWon: average(totals.awayDuelsWon, count),
+    averageHomeTransitionShots: average(totals.homeTransitionShots, count),
+    averageAwayTransitionShots: average(totals.awayTransitionShots, count),
+    averageHomePossessionRegains: average(totals.homePossessionRegains, count),
+    averageAwayPossessionRegains: average(totals.awayPossessionRegains, count),
+    averageHomePassCompletion: round(
+      (totals.homePassesCompleted / Math.max(totals.homePasses, 1)) * 100,
+      2,
+    ),
+    averageAwayPassCompletion: round(
+      (totals.awayPassesCompleted / Math.max(totals.awayPasses, 1)) * 100,
+      2,
+    ),
+    averageHomeShotConversion: round(
+      (totals.homeGoals / Math.max(totals.homeShots, 1)) * 100,
+      2,
+    ),
+    averageAwayShotConversion: round(
+      (totals.awayGoals / Math.max(totals.awayShots, 1)) * 100,
+      2,
+    ),
+    averageHomeOffsides: average(totals.homeOffsides, count),
+    averageAwayOffsides: average(totals.awayOffsides, count),
+    averageHomeSubstitutions: average(totals.homeSubstitutions, count),
+    averageAwaySubstitutions: average(totals.awaySubstitutions, count),
     averageHomePossession: average(totals.homePossession, count),
     averageAwayPossession: average(totals.awayPossession, count),
     averageHomeStarterEnergy: average(totals.homeStarterEnergy, count),
     averageAwayStarterEnergy: average(totals.awayStarterEnergy, count),
   };
+}
+
+function aggregateSpatial(
+  matches: MatchSummary[],
+): MonteCarloSpatialAggregate | null {
+  const spatialMatches = matches
+    .map((match) => match.spatial)
+    .filter((value): value is MatchSpatialAnalytics => Boolean(value));
+
+  if (spatialMatches.length === 0) return null;
+
+  const { columns, rows } = spatialMatches[0];
+  return {
+    columns,
+    rows,
+    home: aggregateSpatialTeam(spatialMatches.map((match) => match.home)),
+    away: aggregateSpatialTeam(spatialMatches.map((match) => match.away)),
+  };
+}
+
+function aggregateSpatialTeam(
+  teams: MatchSpatialAnalytics["home"][],
+): SpatialTeamAggregate {
+  const cells = teams[0].allPlayersHeatmap.length;
+  const allPlayersHeatmap = Array(cells).fill(0) as number[];
+  const positionHeatmaps: Partial<Record<Position, number[]>> = {};
+
+  for (const team of teams) {
+    team.allPlayersHeatmap.forEach((value, index) => {
+      allPlayersHeatmap[index] += value;
+    });
+
+    for (const [position, values] of Object.entries(team.positionHeatmaps)) {
+      const key = position as Position;
+      const target =
+        positionHeatmaps[key] ??
+        (positionHeatmaps[key] = Array(cells).fill(0) as number[]);
+      values?.forEach((value, index) => {
+        target[index] += value;
+      });
+    }
+  }
+
+  return {
+    allPlayersHeatmap,
+    positionHeatmaps,
+    averageBlockCenterProgress: averageMetric(teams, "averageBlockCenterProgress"),
+    averageBlockDepth: averageMetric(teams, "averageBlockDepth"),
+    averageBlockWidth: averageMetric(teams, "averageBlockWidth"),
+    averagePlayersInAttackingHalf: averageMetric(teams, "averagePlayersInAttackingHalf"),
+    averageDefensiveLineProgress: averageMetric(teams, "averageDefensiveLineProgress"),
+    averageBlockCenterInPossession: averageMetric(teams, "averageBlockCenterInPossession"),
+    averageBlockCenterOutOfPossession: averageMetric(teams, "averageBlockCenterOutOfPossession"),
+    averageWidthInPossession: averageMetric(teams, "averageWidthInPossession"),
+    averageWidthOutOfPossession: averageMetric(teams, "averageWidthOutOfPossession"),
+    blockCenterRange: averageMetric(teams, "blockCenterRange"),
+    blockCenterStdDev: averageMetric(teams, "blockCenterStdDev"),
+  };
+}
+
+type SpatialNumericKey =
+  | "averageBlockCenterProgress"
+  | "averageBlockDepth"
+  | "averageBlockWidth"
+  | "averagePlayersInAttackingHalf"
+  | "averageDefensiveLineProgress"
+  | "averageBlockCenterInPossession"
+  | "averageBlockCenterOutOfPossession"
+  | "averageWidthInPossession"
+  | "averageWidthOutOfPossession"
+  | "blockCenterRange"
+  | "blockCenterStdDev";
+
+function averageMetric(
+  teams: MatchSpatialAnalytics["home"][],
+  key: SpatialNumericKey,
+): number {
+  const values = teams.map((team) => team[key]);
+  return average(
+    values.reduce((sum, value) => sum + value, 0),
+    values.length,
+  );
 }
 
 function average(total: number, count: number): number {
@@ -374,13 +491,7 @@ function round(value: number, digits: number): number {
   return Math.round(value * factor) / factor;
 }
 
-function clampInteger(
-  value: number,
-  min: number,
-  max: number,
-): number {
-  if (!Number.isFinite(value)) {
-    return min;
-  }
+function clampInteger(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(max, Math.floor(value)));
 }

@@ -105,6 +105,7 @@ export type MatchEventType =
   | "FULL_TIME"
   | "PASS"
   | "INTERCEPTION"
+  | "OFFSIDE"
   | "TACKLE"
   | "DRIBBLE"
   | "SHOT"
@@ -134,12 +135,40 @@ export interface TeamMatchStats {
   dribbles: number;
   progressiveRuns: number;
   duelsWon: number;
+  transitionShots: number;
+  possessionRegains: number;
   tackles: number;
   fouls: number;
   yellowCards: number;
   redCards: number;
+  offsides: number;
+  substitutions: number;
   possession: number;
   averageStarterEnergy: number;
+}
+
+export interface TeamSpatialAnalytics {
+  samples: number;
+  allPlayersHeatmap: number[];
+  positionHeatmaps: Partial<Record<Position, number[]>>;
+  averageBlockCenterProgress: number;
+  averageBlockDepth: number;
+  averageBlockWidth: number;
+  averagePlayersInAttackingHalf: number;
+  averageDefensiveLineProgress: number;
+  averageBlockCenterInPossession: number;
+  averageBlockCenterOutOfPossession: number;
+  averageWidthInPossession: number;
+  averageWidthOutOfPossession: number;
+  blockCenterRange: number;
+  blockCenterStdDev: number;
+}
+
+export interface MatchSpatialAnalytics {
+  columns: number;
+  rows: number;
+  home: TeamSpatialAnalytics;
+  away: TeamSpatialAnalytics;
 }
 
 export interface MatchReplay {
@@ -181,5 +210,6 @@ export interface MatchSimulationOutput {
       reason: string;
     }>;
   };
+  analytics?: MatchSpatialAnalytics;
   replay: MatchReplay;
 }

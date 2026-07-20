@@ -19,6 +19,7 @@ export function MatchSimulator() {
   const [seed, setSeed] = useState("demo-42");
   const [homeColor, setHomeColor] = useState("#2563eb");
   const [awayColor, setAwayColor] = useState("#dc2626");
+  const [pitchMaxWidth, setPitchMaxWidth] = useState(580);
   const [match, setMatch] = useState<MatchSimulationOutput | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +87,19 @@ export function MatchSimulator() {
             disabledValue={homeColor}
           />
 
+          <div className="field-group pitch-size-field">
+            <label htmlFor="pitch-size">Taille terrain · {pitchMaxWidth}px</label>
+            <input
+              id="pitch-size"
+              type="range"
+              min={400}
+              max={760}
+              step={20}
+              value={pitchMaxWidth}
+              onChange={(event) => setPitchMaxWidth(Number(event.target.value))}
+            />
+          </div>
+
           <button
             type="button"
             className="primary-button"
@@ -117,6 +131,7 @@ export function MatchSimulator() {
             replay={match.replay}
             homeColor={homeColor}
             awayColor={awayColor}
+            pitchMaxWidth={pitchMaxWidth}
           />
         ) : (
           <div className="empty-state">
@@ -180,6 +195,10 @@ export function MatchSimulator() {
                   home={match.stats.home.duelsWon}
                   away={match.stats.away.duelsWon}
                 />
+                <StatRow label="Tirs en transition" home={match.stats.home.transitionShots} away={match.stats.away.transitionShots} />
+                <StatRow label="Récupérations" home={match.stats.home.possessionRegains} away={match.stats.away.possessionRegains} />
+                <StatRow label="Hors-jeu" home={match.stats.home.offsides} away={match.stats.away.offsides} />
+                <StatRow label="Changements" home={match.stats.home.substitutions} away={match.stats.away.substitutions} />
                 <StatRow label="Tacles" home={match.stats.home.tackles} away={match.stats.away.tackles} />
                 <StatRow label="Fautes" home={match.stats.home.fouls} away={match.stats.away.fouls} />
                 <StatRow label="Jaunes" home={match.stats.home.yellowCards} away={match.stats.away.yellowCards} />

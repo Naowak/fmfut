@@ -420,3 +420,160 @@ h1 {
   .result-banner { display: grid; }
   .sensitivity-row { grid-template-columns: 1fr; }
 }
+
+/* V0.4 — scoreboard hors du terrain et taille de viewer réglable */
+.pitch-stage-vertical {
+  width: 100%;
+  margin: 0 auto;
+  transition: max-width 180ms ease;
+}
+
+.match-scoreboard {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  margin: 0 auto 10px;
+  padding: 10px 14px;
+  border: 1px solid #2c3945;
+  border-radius: 11px;
+  background: #0c1218;
+  font-weight: 800;
+}
+
+.match-scoreboard .score-team:last-of-type { text-align: right; }
+.scoreboard-clock {
+  min-width: 54px;
+  padding-left: 10px;
+  border-left: 1px solid #2b3742;
+  color: #9de5b5;
+  text-align: right;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pitch-size-field { min-width: 190px; }
+.pitch-size-field input[type="range"] { width: 100%; }
+
+.goal-celebration {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  gap: 5px;
+  width: min(340px, calc(100% - 42px));
+  padding: 18px 22px;
+  transform: translate(-50%, -50%);
+  border: 3px solid;
+  border-radius: 16px;
+  background: rgba(7, 12, 17, 0.92);
+  box-shadow: 0 20px 60px rgba(0,0,0,.38);
+  text-align: center;
+  z-index: 8;
+  animation: goal-pop 420ms cubic-bezier(.2,.9,.3,1.15);
+}
+.goal-celebration strong {
+  font-size: clamp(28px, 6vw, 48px);
+  letter-spacing: .06em;
+}
+.goal-celebration span { color: #d9e0e6; font-size: 13px; }
+
+@keyframes goal-pop {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(.72); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* Balance Lab spatial */
+.analytics-section-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: end;
+  margin-bottom: 18px;
+}
+.heatmap-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.heatmap-controls select {
+  min-width: 150px;
+  padding: 8px 10px;
+  border: 1px solid #33404d;
+  border-radius: 8px;
+  color: #f5f7f8;
+  background: #0f151c;
+}
+.spatial-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 420px) minmax(260px, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+.heatmap-pitch {
+  position: relative;
+  width: min(100%, 380px);
+  aspect-ratio: 8 / 12;
+  margin: 0 auto;
+  padding: 18px;
+  border: 2px solid rgba(255,255,255,.75);
+  background:
+    linear-gradient(to bottom, transparent 49.7%, rgba(255,255,255,.55) 49.8%, rgba(255,255,255,.55) 50.2%, transparent 50.3%),
+    #176b3c;
+}
+.heatmap-grid {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  border: 1px solid rgba(255,255,255,.28);
+}
+.heatmap-cell {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid rgba(255,255,255,.035);
+}
+.heatmap-goal {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,.72);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+.heatmap-goal-top { top: 3px; }
+.heatmap-goal-bottom { bottom: 3px; }
+.spatial-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.spatial-metric {
+  display: grid;
+  gap: 5px;
+  min-height: 74px;
+  padding: 12px;
+  border: 1px solid #27313b;
+  border-radius: 10px;
+  background: #10171e;
+}
+.spatial-metric strong { font-size: 20px; }
+
+@media (max-width: 760px) {
+  .match-scoreboard {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 7px;
+    font-size: 11px;
+  }
+  .scoreboard-clock {
+    grid-column: 1 / -1;
+    padding: 5px 0 0;
+    border-left: 0;
+    border-top: 1px solid #2b3742;
+    text-align: center;
+  }
+  .analytics-section-header { display: grid; }
+  .spatial-layout { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 520px) {
+  .spatial-metrics { grid-template-columns: 1fr; }
+}

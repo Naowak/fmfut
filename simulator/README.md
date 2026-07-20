@@ -1,5 +1,11 @@
 # FUT Manager — Next.js 2D Match Simulator
 
+## Version actuelle : V0.4
+
+La V0.4 ajoute un bloc de formation dynamique, un hors-jeu simplifié, des rotations automatiques, une célébration/pause sur les buts, un terrain redimensionnable et un Balance Lab enrichi avec heatmaps et métriques spatiales.
+
+Consulter `CHANGELOG_V0.4.md` pour le détail des changements.
+
 Prototype de moteur de match pour le projet FUT Manager.
 
 Version moteur : **0.2.0**.

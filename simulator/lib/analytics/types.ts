@@ -1,3 +1,5 @@
+import type { Position } from "@/lib/game/types";
+
 export const ANALYZED_STATS = [
   "speed",
   "shooting",
@@ -30,10 +32,45 @@ export interface MonteCarloAggregate {
   averageAwayProgressiveRuns: number;
   averageHomeDuelsWon: number;
   averageAwayDuelsWon: number;
+  averageHomeTransitionShots: number;
+  averageAwayTransitionShots: number;
+  averageHomePossessionRegains: number;
+  averageAwayPossessionRegains: number;
+  averageHomePassCompletion: number;
+  averageAwayPassCompletion: number;
+  averageHomeShotConversion: number;
+  averageAwayShotConversion: number;
+  averageHomeOffsides: number;
+  averageAwayOffsides: number;
+  averageHomeSubstitutions: number;
+  averageAwaySubstitutions: number;
   averageHomePossession: number;
   averageAwayPossession: number;
   averageHomeStarterEnergy: number;
   averageAwayStarterEnergy: number;
+}
+
+export interface SpatialTeamAggregate {
+  allPlayersHeatmap: number[];
+  positionHeatmaps: Partial<Record<Position, number[]>>;
+  averageBlockCenterProgress: number;
+  averageBlockDepth: number;
+  averageBlockWidth: number;
+  averagePlayersInAttackingHalf: number;
+  averageDefensiveLineProgress: number;
+  averageBlockCenterInPossession: number;
+  averageBlockCenterOutOfPossession: number;
+  averageWidthInPossession: number;
+  averageWidthOutOfPossession: number;
+  blockCenterRange: number;
+  blockCenterStdDev: number;
+}
+
+export interface MonteCarloSpatialAggregate {
+  columns: number;
+  rows: number;
+  home: SpatialTeamAggregate;
+  away: SpatialTeamAggregate;
 }
 
 export interface SensitivityResult {
@@ -54,6 +91,7 @@ export interface MonteCarloResponse {
   runs: number;
   durationMs: number;
   baseline: MonteCarloAggregate;
+  spatial: MonteCarloSpatialAggregate | null;
   sensitivity: SensitivityResult[];
   roleExperiment: RoleExperimentResult | null;
   notes: string[];

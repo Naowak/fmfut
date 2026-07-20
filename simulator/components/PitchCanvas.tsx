@@ -14,16 +14,20 @@ type Props = {
   replay: MatchReplay;
   homeColor: string;
   awayColor: string;
+  pitchMaxWidth: number;
 };
 
 type InterpolatedPlayer = ReplayPlayerFrame;
 
-export function PitchCanvas({ replay, homeColor, awayColor }: Props) {
+export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationRef = useRef<number | null>(null);
   const lastTimestampRef = useRef<number | null>(null);
+  const goalPauseUntilRef = useRef(0);
+  const handledGoalsRef = useRef(new Set<string>());
 
   const [time, setTime] = useState(0);
+  const [goalCelebration, setGoalCelebration] = useState<MatchEvent | null>(null);
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState<1 | 2 | 4>(1);
 
@@ -35,6 +39,9 @@ export function PitchCanvas({ replay, homeColor, awayColor }: Props) {
   useEffect(() => {
     setTime(0);
     setPlaying(true);
+    setGoalCelebration(null);
+    goalPauseUntilRef.current = 0;
+    handledGoalsRef.current.clear();
     lastTimestampRef.current = null;
   }, [replay]);
 
@@ -47,9 +54,40 @@ export function PitchCanvas({ replay, homeColor, awayColor }: Props) {
       const deltaSeconds = (timestamp - lastTimestampRef.current) / 1000;
       lastTimestampRef.current = timestamp;
 
+      if (goalPauseUntilRef.current > 0) {
+        if (timestamp < goalPauseUntilRef.current) {
+          animationRef.current = requestAnimationFrame(tick);
+          return;
+        }
+        goalPauseUntilRef.current = 0;
+        setGoalCelebration(null);
+      }
+
       if (playing) {
         setTime((previous) => {
-          const next = previous + deltaSeconds * speed;
+          const next = Math.min(
+            replay.logicalDuration,
+            previous + deltaSeconds * speed,
+          );
+
+          const crossedGoal = replay.events.find((event) => {
+            if (event.type !== "GOAL") return false;
+            const key = `${event.t}-${event.runtimeId ?? event.playerId ?? "goal"}`;
+            return (
+              event.t > previous + 1e-6 &&
+              event.t <= next + 1e-6 &&
+              !handledGoalsRef.current.has(key)
+            );
+          });
+
+          if (crossedGoal) {
+            const key = `${crossedGoal.t}-${crossedGoal.runtimeId ?? crossedGoal.playerId ?? "goal"}`;
+            handledGoalsRef.current.add(key);
+            setGoalCelebration(crossedGoal);
+            goalPauseUntilRef.current = timestamp + 2600;
+            return crossedGoal.t;
+          }
+
           if (next >= replay.logicalDuration) {
             setPlaying(false);
             return replay.logicalDuration;
@@ -69,7 +107,7 @@ export function PitchCanvas({ replay, homeColor, awayColor }: Props) {
       }
       lastTimestampRef.current = null;
     };
-  }, [playing, replay.logicalDuration, speed]);
+  }, [playing, replay.events, replay.logicalDuration, speed]);
 
   const snapshot = useMemo(
     () => interpolateReplay(replay.frames, time),
@@ -100,7 +138,7 @@ export function PitchCanvas({ replay, homeColor, awayColor }: Props) {
   );
 
   const visibleSubstitutions = useMemo(() => {
-    const duration = 10;
+    const duration = 6;
     const events = replay.events.filter(
       (event) =>
         event.type === "SUBSTITUTION" &&
@@ -131,7 +169,22 @@ export function PitchCanvas({ replay, homeColor, awayColor }: Props) {
   return (
     <div className="match-view-grid">
       <div className="pitch-column">
-        <div className="pitch-stage pitch-stage-vertical">
+        <div
+          className="match-scoreboard"
+          style={{ maxWidth: `${pitchMaxWidth}px` }}
+        >
+          <span className="score-team">{replay.homeName}</span>
+          <span className="score-value">
+            {liveScore.home} - {liveScore.away}
+          </span>
+          <span className="score-team">{replay.awayName}</span>
+          <span className="scoreboard-clock">{formatDisplayedMinute(displayedMinute)}</span>
+        </div>
+
+        <div
+          className="pitch-stage pitch-stage-vertical"
+          style={{ maxWidth: `${pitchMaxWidth}px` }}
+        >
           <canvas
             ref={canvasRef}
             width={820}
@@ -139,15 +192,17 @@ export function PitchCanvas({ replay, homeColor, awayColor }: Props) {
             className="pitch-canvas pitch-canvas-vertical"
           />
 
-          <div className="score-overlay">
-            <span className="score-team">{replay.homeName}</span>
-            <span className="score-value">
-              {liveScore.home} - {liveScore.away}
-            </span>
-            <span className="score-team">{replay.awayName}</span>
-          </div>
-
-          <div className="clock">{formatDisplayedMinute(displayedMinute)}</div>
+          {goalCelebration && (
+            <div
+              className="goal-celebration"
+              style={{
+                borderColor: goalCelebration.team === "HOME" ? homeColor : awayColor,
+              }}
+            >
+              <strong>BUT !</strong>
+              <span>{goalCelebration.message}</span>
+            </div>
+          )}
 
           {visibleSubstitutions.home && (
             <SubstitutionToast
@@ -173,6 +228,9 @@ export function PitchCanvas({ replay, homeColor, awayColor }: Props) {
               if (time >= replay.logicalDuration) {
                 setTime(0);
                 setPlaying(true);
+                setGoalCelebration(null);
+                goalPauseUntilRef.current = 0;
+                handledGoalsRef.current.clear();
                 return;
               }
               setPlaying((value) => !value);
@@ -208,6 +266,8 @@ export function PitchCanvas({ replay, homeColor, awayColor }: Props) {
             onChange={(event) => {
               setTime(Number(event.target.value));
               setPlaying(false);
+              setGoalCelebration(null);
+              goalPauseUntilRef.current = 0;
             }}
             aria-label="Position dans le replay"
           />
@@ -303,6 +363,7 @@ function isInterestingEvent(event: MatchEvent): boolean {
     "SHOT",
     "SAVE",
     "MISS",
+    "OFFSIDE",
     "YELLOW_CARD",
     "RED_CARD",
     "INJURY",
