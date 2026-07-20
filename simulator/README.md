@@ -1,0 +1,519 @@
+# FUT Manager — Next.js 2D Match Simulator
+
+Prototype de moteur de match pour le projet FUT Manager.
+
+Version moteur : **0.2.0**.
+
+## Architecture
+
+Le principe est volontairement strict :
+
+```text
+CSV joueurs
+    ↓
+Route Handler Next.js (serveur)
+    ↓
+simulateMatch(...)
+    ↓
+résultat + statistiques + événements + replay
+    ↓
+JSON
+    ↓
+Canvas React côté client
+```
+
+Le navigateur **ne calcule jamais le résultat du match**.
+
+Il reçoit un replay terminé et l'interpole visuellement.
+
+Même équipe + même configuration + même seed = même match.
+
+## Stack
+
+- Next.js 16.2
+- React 19.2
+- TypeScript
+- App Router
+- Route Handler `POST /api/matches/simulate`
+- Canvas 2D natif
+- `csv-parse` pour lire le CSV joueurs
+
+## Installation
+
+```bash
+npm install
+npm run dev
+```
+
+Puis ouvrir :
+
+```text
+http://localhost:3000
+```
+
+## Utiliser ton CSV de 18 405 joueurs
+
+Remplace simplement :
+
+```text
+data/players.csv
+```
+
+par ton export complet.
+
+Le format attendu est exactement :
+
+```text
+player_id
+short_name
+long_name
+nationality_name
+primary_position
+alternative_positions_json
+overall
+potential
+speed
+shooting
+passing
+physical
+technique
+intelligence
+```
+
+Alternative : garder le CSV ailleurs et définir :
+
+```bash
+PLAYERS_CSV_PATH=/chemin/absolu/players_normalized.csv npm run dev
+```
+
+## Simulation côté serveur
+
+Endpoint :
+
+```text
+POST /api/matches/simulate
+```
+
+Payload minimal :
+
+```json
+{
+  "seed": "demo-42"
+}
+```
+
+La route charge les joueurs, construit les deux équipes de démonstration puis appelle :
+
+```ts
+simulateMatch({
+  home,
+  away,
+  players,
+  seed,
+})
+```
+
+Le retour contient :
+
+```ts
+{
+  result,
+  stats,
+  notifications,
+  replay
+}
+```
+
+## Replay
+
+Par défaut :
+
+- 90 minutes affichées
+- 360 secondes logiques
+- pas physique : 0,2 s
+- décision IA : 1 s
+- snapshot replay : 0,2 s
+
+À vitesse ×1, le replay complet dure donc environ 6 minutes réelles.
+
+Le client interpole les snapshots pour obtenir une animation fluide.
+
+## IA actuellement implémentée
+
+Le prototype contient déjà :
+
+- positions d'ancrage en 4-3-3 ;
+- mouvement avec et sans ballon ;
+- phases possession / défense simplifiées ;
+- pressing du joueur le plus proche ;
+- rôles :
+  - DEFENSIVE
+  - NORMAL
+  - OFFENSIVE
+  - CREATOR
+  - PRESSING
+- tactique collective :
+  - bloc LOW / NORMAL / HIGH
+  - construction SHORT / BALANCED / DIRECT
+- passes ;
+- risque d'interception ;
+- ballon libre ;
+- dribble ;
+- tirs ;
+- gardiens ;
+- buts ;
+- tacles ;
+- fautes ;
+- jaunes ;
+- deux jaunes ;
+- rouges ;
+- blessures ;
+- fatigue ;
+- remplacements automatiques ;
+- synergie de nationalité entre voisins tactiques ;
+- malus de poste principalement appliqué à l'Intelligence.
+
+## Intelligence et température
+
+Le choix des actions utilise un softmax.
+
+La température dépend de l'Intelligence effective :
+
+```ts
+T =
+  T_min +
+  (1 - Intelligence / 100) ** gamma *
+  (T_max - T_min)
+```
+
+Un joueur intelligent sélectionne donc beaucoup plus souvent les actions ayant
+la meilleure utility.
+
+La réussite technique de l'action est ensuite calculée séparément.
+
+Exemple :
+
+```text
+Intelligence -> quelle passe choisir ?
+Passe + Technique -> est-ce que la passe réussit ?
+```
+
+## Synergie
+
+Une formation est un graphe de slots.
+
+Exemple :
+
+```text
+LCM est voisin de :
+LB
+CDM
+RCM
+LW
+ST
+```
+
+Chaque voisin actif de même nationalité donne actuellement :
+
+```text
++2 Intelligence
+```
+
+avec un cap à :
+
+```text
++6
+```
+
+## Hors poste
+
+Le joueur conserve sa Vitesse.
+
+Le malus principal touche l'Intelligence.
+
+Les stats Passe et Technique reçoivent seulement un petit malus.
+
+La matrice est dans :
+
+```text
+lib/game/compatibility.ts
+```
+
+## Équipes
+
+Les deux équipes de démonstration sont définies dans :
+
+```text
+lib/game/sample-teams.ts
+```
+
+Le format est déjà pensé pour être remplacé par le futur écran de composition :
+
+```ts
+{
+  name,
+  formationId,
+  starters: {
+    GK: playerId,
+    LB: playerId,
+    ...
+  },
+  bench: [playerId, ...],
+  roles: {
+    ST: "OFFENSIVE",
+    CDM: "DEFENSIVE"
+  },
+  tactics: {
+    blockHeight: "NORMAL",
+    buildUp: "BALANCED"
+  }
+}
+```
+
+Tu peux également envoyer `home` et `away` directement dans le POST de
+simulation.
+
+## Fichiers importants
+
+### `lib/game/engine.ts`
+
+Le moteur complet.
+
+Aucune dépendance React ou Canvas.
+
+C'est cette fonction qui devra devenir le coeur stable du jeu.
+
+### `lib/game/config.ts`
+
+Tous les paramètres généraux de simulation.
+
+### `lib/game/compatibility.ts`
+
+Matrice hors poste et calcul des stats effectives.
+
+### `lib/game/formations.ts`
+
+Formation 4-3-3, coordonnées et graphe de synergie.
+
+### `lib/game/rng.ts`
+
+PRNG déterministe.
+
+### `app/api/matches/simulate/route.ts`
+
+Frontière serveur.
+
+### `components/PitchCanvas.tsx`
+
+Viewer uniquement.
+
+Il ne décide de rien concernant le match.
+
+## Important pour la suite
+
+Ce moteur est une **V0 jouable et architecturale**, pas encore un modèle de
+football équilibré.
+
+La prochaine étape recommandée est de construire un script Monte-Carlo qui
+simule 1 000 à 100 000 matchs sans replay et mesure :
+
+- buts par match ;
+- tirs ;
+- tirs cadrés ;
+- passes ;
+- possession ;
+- influence réelle de chaque stat ;
+- avantage d'une formation ;
+- impact de l'Intelligence ;
+- impact des rôles ;
+- fatigue ;
+- fréquence des cartons et blessures.
+
+Le moteur est volontairement séparé de Next.js pour rendre cette étape facile.
+
+
+---
+
+## Version 0.2 — mouvement, tirs et duels
+
+Cette version corrige quatre limites observées sur la première V0.
+
+### 1. Appels et liberté sans ballon
+
+Les joueurs offensifs ne restent plus simplement collés à leur ancre de formation.
+
+Le moteur crée maintenant des **intentions d'appel persistantes** :
+
+```text
+runTarget
+runUntil
+```
+
+Un appel dure plusieurs secondes logiques. Pendant cet intervalle, la cible de
+déplacement du joueur n'est plus son ancre mais une zone plus profonde.
+
+Le nombre d'appels simultanés est limité afin de conserver une structure
+collective.
+
+Les probabilités dépendent notamment :
+
+- du poste ;
+- du rôle ;
+- de l'Intelligence effective.
+
+Un joueur en appel reçoit également un bonus d'utility lorsqu'un porteur évalue
+une passe progressive vers lui.
+
+### 2. Davantage de conduite de balle
+
+L'utility du dribble/progression a été renforcée et une courte pénalité est
+appliquée aux passes immédiatement après la prise de contrôle du ballon.
+
+Le but est d'éviter :
+
+```text
+réception -> passe instantanée -> réception -> passe instantanée
+```
+
+et d'obtenir davantage de séquences :
+
+```text
+réception
+-> contrôle
+-> progression
+-> appel d'un partenaire
+-> passe ou tir
+```
+
+### 3. Tirs visibles
+
+Les tirs utilisent toujours l'état `TRANSIT`, comme les passes, mais :
+
+- leur durée minimale a été augmentée ;
+- le replay enregistre maintenant un frame toutes les 0,2 secondes ;
+- le gardien se déplace vers la trajectoire estimée ;
+- un arrêt peut être capté ou repoussé.
+
+États possibles :
+
+```text
+GOAL
+SAVE_CATCH
+SAVE_REBOUND
+MISS
+```
+
+Un `SAVE_REBOUND` crée un ballon libre autour du gardien.
+
+### 4. Déséquilibre après duel
+
+Un joueur qui perd un duel reçoit maintenant un court état :
+
+```text
+stunnedUntil
+```
+
+Pendant ce temps :
+
+- sa vitesse est fortement réduite ;
+- il ne peut pas immédiatement reprendre le ballon ;
+- le vainqueur peut créer quelques mètres de séparation.
+
+Cela évite les échanges de possession instantanés entre deux joueurs collés,
+notamment entre un attaquant et un gardien.
+
+### 5. Joueurs plus rapides
+
+Les vitesses de déplacement normalisées ont été augmentées dans :
+
+```text
+lib/game/config.ts
+```
+
+Les nouvelles valeurs de départ sont :
+
+```text
+minSpeedPerLogicalSecond: 0.022
+maxSpeedPerLogicalSecond: 0.055
+```
+
+Elles restent entièrement configurables.
+
+---
+
+## Balance Lab — Monte-Carlo headless
+
+Une nouvelle page est disponible :
+
+```text
+http://localhost:3000/analytics
+```
+
+Elle appelle :
+
+```text
+POST /api/analytics/monte-carlo
+```
+
+Les matchs analytiques utilisent :
+
+```ts
+recordReplay: false
+```
+
+Le moteur ne génère donc ni snapshots Canvas ni journal d'événements complet.
+
+Le dashboard mesure actuellement :
+
+- buts par match ;
+- win rate / draw rate ;
+- tirs ;
+- passes ;
+- dribbles ;
+- appels progressifs ;
+- duels gagnés ;
+- possession.
+
+### Sensibilité des six stats
+
+Le dashboard peut lancer six expériences appariées.
+
+Pour chaque statistique :
+
+```text
+Vitesse
+Tir
+Passe
+Physique
+Technique
+Intelligence
+```
+
+le moteur :
+
+1. reprend exactement la même série de seeds ;
+2. applique `+10` à cette stat sur le onze domicile ;
+3. rejoue la série ;
+4. mesure le delta de différentiel de buts ;
+5. mesure le delta de taux de victoire.
+
+Les joueurs boostés reçoivent des IDs runtime synthétiques dans l'expérience,
+afin qu'un joueur présent dans les deux équipes ne soit pas boosté des deux côtés.
+
+### Expérience sur les rôles
+
+Le Balance Lab compare également :
+
+```text
+rôles configurés
+vs
+tous les rôles domicile = NORMAL
+```
+
+avec les mêmes seeds.
+
+### Formations
+
+La comparaison automatique de formations n'est pas encore active car le moteur
+V0.2 ne contient qu'un 4-3-3. Le runner est prévu pour accueillir cette
+expérience dès que plusieurs formations sont disponibles.
