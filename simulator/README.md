@@ -517,3 +517,17 @@ avec les mêmes seeds.
 La comparaison automatique de formations n'est pas encore active car le moteur
 V0.2 ne contient qu'un 4-3-3. Le runner est prévu pour accueillir cette
 expérience dès que plusieurs formations sont disponibles.
+
+---
+
+## V0.3 — balle physique et nouvelle présentation
+
+La V0.3 remplace la résolution instantanée des passes par une balle physique simplifiée.
+
+Une passe possède maintenant une vitesse et une décélération. Le moteur calcule une erreur de direction et de dosage dépendant principalement de `passing`, puis les joueurs doivent réellement rejoindre la trajectoire de balle pour en prendre le contrôle.
+
+Le viewer pivote le repère du moteur sans modifier la simulation : l'équipe `HOME` apparaît en bas de l'écran et attaque vers le haut. Les commentaires sont placés à droite, et les statistiques sous le terrain.
+
+Les couleurs des équipes sont configurables dans le viewer parmi huit choix. Le réglage par défaut est bleu pour l'équipe du joueur et rouge pour l'adversaire.
+
+Le Balance Lab expose maintenant l'énergie moyenne finale des titulaires pour suivre le calibrage de la fatigue.

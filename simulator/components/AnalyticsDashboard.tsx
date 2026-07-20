@@ -8,7 +8,7 @@ import type {
 
 export function AnalyticsDashboard() {
   const [runs, setRuns] = useState(50);
-  const [seedPrefix, setSeedPrefix] = useState("balance-v02");
+  const [seedPrefix, setSeedPrefix] = useState("balance-v03");
   const [sensitivity, setSensitivity] = useState(true);
   const [data, setData] = useState<MonteCarloResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -184,6 +184,11 @@ export function AnalyticsDashboard() {
                   label="Possession"
                   home={`${data.baseline.averageHomePossession}%`}
                   away={`${data.baseline.averageAwayPossession}%`}
+                />
+                <MetricRow
+                  label="Énergie moyenne finale des titulaires"
+                  home={`${data.baseline.averageHomeStarterEnergy}%`}
+                  away={`${data.baseline.averageAwayStarterEnergy}%`}
                 />
               </tbody>
             </table>

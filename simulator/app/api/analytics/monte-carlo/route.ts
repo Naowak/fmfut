@@ -88,6 +88,8 @@ export async function POST(request: Request) {
         "Les simulations analytiques tournent avec recordReplay=false : aucun frame Canvas n'est généré.",
         "Les expériences de sensibilité utilisent exactement les mêmes seeds que la baseline.",
         "Le boost de +10 est appliqué à la stat testée sur le onze titulaire domicile uniquement.",
+        "La V0.3 mesure aussi l'énergie moyenne finale des titulaires pour calibrer la fatigue.",
+        "Les passes utilisent désormais une balle physique avec vélocité, décélération et contrôle à courte distance.",
         "Le moteur ne possède encore qu'une formation 4-3-3 : la comparaison de formations sera ajoutée quand plusieurs formations existeront.",
       ],
     };
@@ -295,6 +297,8 @@ function aggregate(matches: MatchSummary[]): MonteCarloAggregate {
     awayDuelsWon: 0,
     homePossession: 0,
     awayPossession: 0,
+    homeStarterEnergy: 0,
+    awayStarterEnergy: 0,
   };
 
   for (const match of matches) {
@@ -320,6 +324,8 @@ function aggregate(matches: MatchSummary[]): MonteCarloAggregate {
     totals.awayDuelsWon += match.away.duelsWon;
     totals.homePossession += match.home.possession;
     totals.awayPossession += match.away.possession;
+    totals.homeStarterEnergy += match.home.averageStarterEnergy;
+    totals.awayStarterEnergy += match.away.averageStarterEnergy;
   }
 
   return {
@@ -354,6 +360,8 @@ function aggregate(matches: MatchSummary[]): MonteCarloAggregate {
     averageAwayDuelsWon: average(totals.awayDuelsWon, count),
     averageHomePossession: average(totals.homePossession, count),
     averageAwayPossession: average(totals.awayPossession, count),
+    averageHomeStarterEnergy: average(totals.homeStarterEnergy, count),
+    averageAwayStarterEnergy: average(totals.awayStarterEnergy, count),
   };
 }
 

@@ -32,6 +32,8 @@ export interface MonteCarloAggregate {
   averageAwayDuelsWon: number;
   averageHomePossession: number;
   averageAwayPossession: number;
+  averageHomeStarterEnergy: number;
+  averageAwayStarterEnergy: number;
 }
 
 export interface SensitivityResult {

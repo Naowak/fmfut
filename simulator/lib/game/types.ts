@@ -139,6 +139,7 @@ export interface TeamMatchStats {
   yellowCards: number;
   redCards: number;
   possession: number;
+  averageStarterEnergy: number;
 }
 
 export interface MatchReplay {

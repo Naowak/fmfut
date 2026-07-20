@@ -1,4 +1,4 @@
-export const ENGINE_VERSION = "0.2.0";
+export const ENGINE_VERSION = "0.3.0";
 
 export const MATCH_CONFIG = {
   displayedMinutes: 90,
@@ -9,9 +9,11 @@ export const MATCH_CONFIG = {
   maxSubstitutions: 5,
 
   decision: {
-    temperatureMin: 0.06,
-    temperatureMax: 0.55,
-    temperatureGamma: 1.5,
+    // V0.3 : plage volontairement resserrée. L'Intelligence doit compter,
+    // mais ne plus écraser les cinq autres statistiques.
+    temperatureMin: 0.10,
+    temperatureMax: 0.36,
+    temperatureGamma: 1.25,
   },
 
   synergy: {
@@ -20,16 +22,18 @@ export const MATCH_CONFIG = {
   },
 
   fatigue: {
-    minStatMultiplier: 0.75,
-    autoSubDisplayedMinute: 60,
-    autoSubEnergyThreshold: 56,
+    minStatMultiplier: 0.82,
+    autoSubDisplayedMinute: 65,
+    autoSubEnergyThreshold: 42,
+    distanceEnergyCost: 3.5,
+    pressingCostMultiplier: 1.10,
   },
 
   movement: {
     minSpeedPerLogicalSecond: 0.022,
     maxSpeedPerLogicalSecond: 0.055,
-    controlledBallSpeedMultiplierMin: 0.78,
-    controlledBallSpeedMultiplierMax: 0.95,
+    controlledBallSpeedMultiplierMin: 0.80,
+    controlledBallSpeedMultiplierMax: 0.96,
   },
 
   offBallRuns: {
@@ -37,7 +41,7 @@ export const MATCH_CONFIG = {
     maxDuration: 5.2,
     minDepth: 0.10,
     maxDepth: 0.24,
-    baseChancePerDecision: 0.07,
+    baseChancePerDecision: 0.06,
   },
 
   duels: {
@@ -51,8 +55,17 @@ export const MATCH_CONFIG = {
   },
 
   ball: {
-    passMinDuration: 0.32,
-    passMaxDuration: 1.0,
+    // Les passes ne téléportent plus la possession à la cible : le ballon
+    // possède une vélocité et ralentit jusqu'à être contrôlé ou s'arrêter.
+    passDeceleration: 0.12,
+    passMinSpeed: 0.11,
+    passMaxSpeed: 0.36,
+    looseBallStopSpeed: 0.008,
+    controlRadiusMin: 0.012,
+    controlRadiusMax: 0.022,
+    comfortableControlSpeed: 0.22,
+    reboundDeceleration: 0.15,
+
     shotMinDuration: 0.65,
     shotMaxDuration: 1.25,
   },

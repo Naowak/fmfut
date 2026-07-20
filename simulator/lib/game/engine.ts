@@ -55,7 +55,7 @@ type RuntimeTeam = {
   players: RuntimePlayer[];
   substitutionsUsed: number;
   score: number;
-  stats: Omit<TeamMatchStats, "possession"> & {
+  stats: Omit<TeamMatchStats, "possession" | "averageStarterEnergy"> & {
     possessionTicks: number;
   };
 };
@@ -87,6 +87,12 @@ type LooseBall = {
   mode: "LOOSE";
   pos: Vec2;
   age: number;
+  velocity?: Vec2;
+  deceleration?: number;
+  sourceTeamIndex?: TeamIndex;
+  actorId?: string;
+  intendedReceiverId?: string;
+  kind?: "PASS" | "REBOUND" | "DEFLECTION";
 };
 
 type RuntimeBall = ControlledBall | TransitBall | LooseBall;
@@ -253,6 +259,7 @@ export function simulateMatch(params: {
 
   const homeStats: TeamMatchStats = {
     ...withoutPossessionTicks(home.stats),
+    averageStarterEnergy: averageStarterEnergy(home),
     possession:
       totalPossessionTicks === 0
         ? 50
@@ -264,6 +271,7 @@ export function simulateMatch(params: {
 
   const awayStats: TeamMatchStats = {
     ...withoutPossessionTicks(away.stats),
+    averageStarterEnergy: averageStarterEnergy(away),
     possession: round(100 - homeStats.possession, 1),
   };
 
@@ -467,9 +475,8 @@ function chooseBallAction(
     candidates.push({
       kind: "SHOT",
       utility:
-        shotQuality * 0.72 +
-        (stats.shooting / 100) * 0.11 +
-        (owner.role === "OFFENSIVE" ? 0.035 : 0),
+        shotQuality * 0.78 +
+        (owner.role === "OFFENSIVE" ? 0.01 : 0),
     });
   }
 
@@ -532,11 +539,10 @@ function chooseBallAction(
   candidates.push({
     kind: "DRIBBLE",
     utility:
-      0.22 +
-      0.30 * spaceAhead +
-      0.19 * (stats.technique / 100) +
-      0.07 * (stats.speed / 100) +
-      (owner.role === "OFFENSIVE" ? 0.08 : 0),
+      0.24 +
+      0.35 * spaceAhead +
+      0.08 * (stats.technique / 100) +
+      (owner.role === "OFFENSIVE" ? 0.02 : 0),
   });
 
   candidates.push({
@@ -602,48 +608,90 @@ function startPass(
     synergyBonus: passer.synergyBonus,
   });
 
-  const distance = distanceBetween(passer.pos, receiver.pos);
+  const receiverTarget =
+    receiver.runTarget && receiver.runUntil > state.t
+      ? {
+          x: lerp(receiver.pos.x, receiver.runTarget.x, 0.58),
+          y: lerp(receiver.pos.y, receiver.runTarget.y, 0.58),
+        }
+      : {
+          x: lerp(receiver.pos.x, receiver.target.x, 0.28),
+          y: lerp(receiver.pos.y, receiver.target.y, 0.28),
+        };
+
+  const distance = distanceBetween(passer.pos, receiverTarget);
   const pressure = clamp(
     (0.07 - nearestDistance(passer.pos, opponents)) / 0.07,
   );
-  const laneRisk = passingLaneRisk(passer.pos, receiver.pos, opponents);
+  const laneRisk = passingLaneRisk(passer.pos, receiverTarget, opponents);
 
-  const probability = clamp(
-    0.22 +
-      0.43 * (stats.passing / 100) +
-      0.14 * (stats.technique / 100) +
-      0.09 * (stats.intelligence / 100) -
-      0.28 * distance -
-      0.22 * pressure -
-      0.32 * laneRisk,
-    0.05,
-    0.97,
+  // La qualité de passe influe sur la précision et le dosage, pas sur une
+  // réussite booléenne décidée au moment de la frappe.
+  const passQuality = clamp(
+    (0.78 * stats.passing +
+      0.16 * stats.technique +
+      0.06 * stats.intelligence) /
+      100,
   );
 
-  const success = state.rng.chance(probability);
-  const interceptor = success
-    ? undefined
-    : nearestPlayerToPoint(receiver.pos, opponents);
+  const errorMagnitude =
+    (1 - passQuality) *
+    (0.018 + distance * 0.11) *
+    (0.75 + pressure * 0.75 + laneRisk * 0.55);
+  const errorAngle = state.rng.between(0, Math.PI * 2);
+
+  const target = {
+    x: clamp(
+      receiverTarget.x + Math.cos(errorAngle) * errorMagnitude,
+      0.02,
+      0.98,
+    ),
+    y: clamp(
+      receiverTarget.y + Math.sin(errorAngle) * errorMagnitude,
+      0.03,
+      0.97,
+    ),
+  };
+
+  const travelDistance = distanceBetween(passer.pos, target);
+  const idealSpeed = Math.sqrt(
+    2 * MATCH_CONFIG.ball.passDeceleration * Math.max(travelDistance, 0.01),
+  ) * 1.08;
+  const powerError =
+    state.rng.between(-0.22, 0.22) *
+    (1 - passQuality) *
+    (1 + pressure * 0.5);
+  const kickSpeed = clamp(
+    idealSpeed * (1 + powerError),
+    MATCH_CONFIG.ball.passMinSpeed,
+    MATCH_CONFIG.ball.passMaxSpeed,
+  );
+
+  const direction = normalizeVector({
+    x: target.x - passer.pos.x,
+    y: target.y - passer.pos.y,
+  });
 
   team.stats.passesAttempted += 1;
 
   state.ball = {
-    mode: "TRANSIT",
-    kind: "PASS",
-    actorId: passer.runtimeId,
-    from: { ...passer.pos },
-    to: { ...receiver.pos },
+    mode: "LOOSE",
     pos: { ...passer.pos },
-    elapsed: 0,
-    duration: clamp(
-      0.24 + distance * 1.3,
-      MATCH_CONFIG.ball.passMinDuration,
-      MATCH_CONFIG.ball.passMaxDuration,
-    ),
+    age: 0,
+    velocity: {
+      x: direction.x * kickSpeed,
+      y: direction.y * kickSpeed,
+    },
+    deceleration: MATCH_CONFIG.ball.passDeceleration,
+    sourceTeamIndex: passer.teamIndex,
+    actorId: passer.runtimeId,
     intendedReceiverId: receiver.runtimeId,
-    passSuccess: success,
-    interceptId: interceptor?.runtimeId,
+    kind: "PASS",
   };
+
+  // Le receveur et les adversaires proches commencent immédiatement à courir
+  // vers le point d'arrêt prédit de la balle.
+  resolveLooseBall(state);
 
   emit(state, {
     type: "PASS",
@@ -686,29 +734,29 @@ function startShot(state: MatchState, shooter: RuntimePlayer): void {
   const goal = opponentGoal(shooter.side);
   const shotQuality = estimateShotQuality(shooter.pos, shooter.side);
   const execution =
-    (0.65 * shooterStats.shooting +
-      0.2 * shooterStats.technique +
-      0.15 * shooterStats.intelligence) /
+    (0.85 * shooterStats.shooting +
+      0.13 * shooterStats.technique +
+      0.02 * shooterStats.intelligence) /
     100;
 
   const goalkeeperQuality =
-    (0.35 * goalkeeperStats.technique +
-      0.35 * goalkeeperStats.intelligence +
-      0.15 * goalkeeperStats.speed +
+    (0.42 * goalkeeperStats.technique +
+      0.25 * goalkeeperStats.intelligence +
+      0.18 * goalkeeperStats.speed +
       0.15 * goalkeeperStats.physical) /
     100;
 
   const angleFactor = clamp(1 - Math.abs(shooter.pos.y - 0.5) * 1.25, 0.3, 1);
   const onTargetProbability = clamp(
-    0.3 + 0.58 * execution * angleFactor,
-    0.18,
-    0.94,
+    0.20 + 0.72 * execution * angleFactor,
+    0.14,
+    0.96,
   );
 
   const rawGoalProbability = clamp(
     shotQuality *
-      (0.07 + 0.22 * execution) *
-      (1.0 - 0.55 * goalkeeperQuality),
+      (0.03 + 0.38 * execution) *
+      (1.02 - 0.50 * goalkeeperQuality),
     0.01,
     0.72,
   );
@@ -813,13 +861,50 @@ function updateBall(state: MatchState, dt: number): void {
         mode: "LOOSE",
         pos: { ...state.ball.pos },
         age: 0,
+        velocity: { x: 0, y: 0 },
       };
     }
     return;
   }
 
   if (state.ball.mode === "LOOSE") {
+    const previousPos = { ...state.ball.pos };
+    const velocity = state.ball.velocity ?? { x: 0, y: 0 };
+    const currentSpeed = vectorLength(velocity);
+
+    if (currentSpeed > 0) {
+      state.ball.pos = {
+        x: state.ball.pos.x + velocity.x * dt,
+        y: state.ball.pos.y + velocity.y * dt,
+      };
+
+      // Le prototype ne gère pas encore les touches/corners : on conserve la
+      // balle dans le terrain et on amortit fortement l'axe qui touche la ligne.
+      if (state.ball.pos.x < 0.01 || state.ball.pos.x > 0.99) {
+        state.ball.pos.x = clamp(state.ball.pos.x, 0.01, 0.99);
+        velocity.x *= -0.18;
+      }
+      if (state.ball.pos.y < 0.01 || state.ball.pos.y > 0.99) {
+        state.ball.pos.y = clamp(state.ball.pos.y, 0.01, 0.99);
+        velocity.y *= -0.18;
+      }
+
+      const deceleration =
+        state.ball.deceleration ?? MATCH_CONFIG.ball.passDeceleration;
+      const nextSpeed = Math.max(0, currentSpeed - deceleration * dt);
+      if (nextSpeed <= MATCH_CONFIG.ball.looseBallStopSpeed) {
+        state.ball.velocity = { x: 0, y: 0 };
+      } else {
+        const direction = normalizeVector(velocity);
+        state.ball.velocity = {
+          x: direction.x * nextSpeed,
+          y: direction.y * nextSpeed,
+        };
+      }
+    }
+
     state.ball.age += dt;
+    tryControlLooseBall(state, previousPos, state.ball.pos);
     return;
   }
 
@@ -922,10 +1007,27 @@ function finishShot(state: MatchState, ball: TransitBall): void {
   }
 
   if (ball.shotResult === "SAVE_REBOUND" && goalkeeper?.active) {
+    const reboundTarget = ball.reboundTo ?? {
+      x: goalkeeper.pos.x + attackDirection(goalkeeper.side) * 0.06,
+      y: goalkeeper.pos.y,
+    };
+    const reboundDirection = normalizeVector({
+      x: reboundTarget.x - goalkeeper.pos.x,
+      y: reboundTarget.y - goalkeeper.pos.y,
+    });
+    const reboundSpeed = state.rng.between(0.10, 0.18);
     state.ball = {
       mode: "LOOSE",
-      pos: { ...(ball.reboundTo ?? goalkeeper.pos) },
+      pos: { ...goalkeeper.pos },
       age: 0,
+      velocity: {
+        x: reboundDirection.x * reboundSpeed,
+        y: reboundDirection.y * reboundSpeed,
+      },
+      deceleration: MATCH_CONFIG.ball.reboundDeceleration,
+      sourceTeamIndex: shooter.teamIndex,
+      actorId: shooter.runtimeId,
+      kind: "REBOUND",
     };
     emit(state, {
       type: "SAVE",
@@ -993,11 +1095,13 @@ function attemptDefensiveDuel(
   });
 
   const tackleProbability = clamp(
-    0.26 +
-      0.22 * (defenderStats.physical / 100) +
-      0.24 * (defenderStats.intelligence / 100) -
-      0.2 * (ownerStats.technique / 100) -
-      0.08 * (ownerStats.physical / 100),
+    0.24 +
+      0.28 * (defenderStats.physical / 100) +
+      0.16 * (defenderStats.intelligence / 100) +
+      0.04 * (defenderStats.speed / 100) -
+      0.22 * (ownerStats.technique / 100) -
+      0.16 * (ownerStats.physical / 100) -
+      0.08 * (ownerStats.speed / 100),
     0.08,
     0.62,
   );
@@ -1197,48 +1301,192 @@ function resolveLooseBall(state: MatchState): void {
     return;
   }
 
-  const candidates = state.allPlayers.filter(
-    (player) =>
-      player.active &&
-      !player.injured &&
-      !player.redCard &&
-      distanceBetween(player.pos, state.ball.pos) < 0.16 &&
-      player.assignedPosition,
-  );
+  const predictedStop = predictLooseBallStop(state.ball);
 
-  if (candidates.length === 0) {
+  // Chaque équipe envoie au maximum deux joueurs vers la balle. L'éventuel
+  // receveur visé est prioritaire, mais il doit physiquement rejoindre la balle.
+  for (const team of state.teams) {
+    const candidates = team.players
+      .filter(
+        (player) =>
+          player.active &&
+          !player.injured &&
+          !player.redCard &&
+          player.assignedPosition &&
+          player.stunnedUntil <= state.t,
+      )
+      .sort((a, b) => {
+        const aPriority =
+          state.ball.mode === "LOOSE" &&
+          a.runtimeId === state.ball.intendedReceiverId
+            ? -0.08
+            : 0;
+        const bPriority =
+          state.ball.mode === "LOOSE" &&
+          b.runtimeId === state.ball.intendedReceiverId
+            ? -0.08
+            : 0;
+        return (
+          distanceBetween(a.pos, predictedStop) + aPriority -
+          (distanceBetween(b.pos, predictedStop) + bPriority)
+        );
+      })
+      .slice(0, 2);
+
+    for (const player of candidates) {
+      player.target = { ...predictedStop };
+    }
+  }
+
+  // Pour une balle déjà quasiment immobile, une prise de contrôle n'est
+  // possible qu'à très courte distance. Aucun joueur n'est téléporté dessus.
+  tryControlLooseBall(state, state.ball.pos, state.ball.pos);
+}
+
+function tryControlLooseBall(
+  state: MatchState,
+  segmentStart: Vec2,
+  segmentEnd: Vec2,
+): void {
+  if (state.ball.mode !== "LOOSE") {
     return;
   }
 
-  const scored = candidates.map((player) => {
-    const stats = effectiveStats({
-      player: player.card,
-      assignedPosition: player.assignedPosition!,
-      energy: player.energy,
-      synergyBonus: player.synergyBonus,
+  const looseBall = state.ball;
+  const ballSpeed = vectorLength(looseBall.velocity ?? { x: 0, y: 0 });
+  const candidates = state.allPlayers
+    .filter(
+      (player) =>
+        player.active &&
+        !player.injured &&
+        !player.redCard &&
+        player.assignedPosition &&
+        player.stunnedUntil <= state.t &&
+        !(
+          looseBall.actorId === player.runtimeId &&
+          looseBall.age < 0.45
+        ),
+    )
+    .map((player) => {
+      const stats = effectiveStats({
+        player: player.card,
+        assignedPosition: player.assignedPosition!,
+        energy: player.energy,
+        synergyBonus: player.synergyBonus,
+      });
+      const controlRadius = lerp(
+        MATCH_CONFIG.ball.controlRadiusMin,
+        MATCH_CONFIG.ball.controlRadiusMax,
+        stats.technique / 100,
+      );
+      return {
+        player,
+        stats,
+        distance: pointToSegmentDistance(player.pos, segmentStart, segmentEnd),
+        controlRadius,
+      };
+    })
+    .filter((candidate) => candidate.distance <= candidate.controlRadius)
+    .sort((a, b) => {
+      const aIntended =
+        a.player.runtimeId === looseBall.intendedReceiverId ? -0.006 : 0;
+      const bIntended =
+        b.player.runtimeId === looseBall.intendedReceiverId ? -0.006 : 0;
+      return a.distance + aIntended - (b.distance + bIntended);
     });
-    const distanceScore =
-      1 - clamp(distanceBetween(player.pos, state.ball.pos) / 0.16);
-    const score =
-      0.42 * distanceScore +
-      0.2 * (stats.speed / 100) +
-      0.18 * (stats.physical / 100) +
-      0.2 * (stats.intelligence / 100);
-    return { player, score };
-  });
 
-  const winner = softmaxPick(
-    scored.map(({ player, score }) => ({
-      player,
-      utility: score,
-    })),
-    0.16,
-    state.rng,
-  ).player;
+  for (const candidate of candidates) {
+    const { player, stats } = candidate;
+    const firstTouchQuality = clamp(
+      (0.52 * stats.technique +
+        0.26 * stats.passing +
+        0.08 * stats.intelligence +
+        0.14 * stats.physical) /
+        100,
+    );
+    const speedDifficulty = clamp(
+      ballSpeed / MATCH_CONFIG.ball.comfortableControlSpeed,
+      0,
+      1.8,
+    );
+    let controlProbability = clamp(
+      0.30 +
+        0.68 * firstTouchQuality -
+        0.30 * Math.max(0, speedDifficulty - 0.45),
+      0.10,
+      0.98,
+    );
 
-  setControlledBall(state, winner);
+    if (player.runtimeId === looseBall.intendedReceiverId) {
+      controlProbability = clamp(controlProbability + 0.10, 0, 0.99);
+    }
+
+    if (ballSpeed <= MATCH_CONFIG.ball.looseBallStopSpeed * 1.5) {
+      controlProbability = Math.max(controlProbability, 0.94);
+    }
+
+    if (!state.rng.chance(controlProbability)) {
+      // Mauvais contrôle : la balle est freinée et légèrement déviée, mais
+      // continue d'exister physiquement au lieu d'être attribuée au joueur.
+      const currentVelocity = state.ball.velocity ?? { x: 0, y: 0 };
+      const angle = state.rng.between(-0.22, 0.22);
+      state.ball.velocity = rotateVector(
+        {
+          x: currentVelocity.x * 0.72,
+          y: currentVelocity.y * 0.72,
+        },
+        angle,
+      );
+      continue;
+    }
+
+    const passSourceTeam = state.ball.sourceTeamIndex;
+    const passActorId = state.ball.actorId;
+    const wasPass = state.ball.kind === "PASS";
+
+    if (
+      wasPass &&
+      passSourceTeam !== undefined &&
+      player.teamIndex === passSourceTeam &&
+      player.runtimeId !== passActorId
+    ) {
+      state.teams[player.teamIndex].stats.passesCompleted += 1;
+    } else if (
+      wasPass &&
+      passSourceTeam !== undefined &&
+      player.teamIndex !== passSourceTeam
+    ) {
+      emit(state, {
+        type: "INTERCEPTION",
+        team: player.side,
+        playerId: player.card.playerId,
+        runtimeId: player.runtimeId,
+        message: `${player.card.shortName} coupe la trajectoire et récupère le ballon.`,
+      });
+    }
+
+    setControlledBall(state, player, { ...state.ball.pos });
+    return;
+  }
 }
 
+function predictLooseBallStop(ball: LooseBall): Vec2 {
+  const velocity = ball.velocity ?? { x: 0, y: 0 };
+  const speed = vectorLength(velocity);
+  if (speed <= MATCH_CONFIG.ball.looseBallStopSpeed) {
+    return { ...ball.pos };
+  }
+
+  const deceleration =
+    ball.deceleration ?? MATCH_CONFIG.ball.passDeceleration;
+  const stopDistance = (speed * speed) / (2 * Math.max(deceleration, 0.001));
+  const direction = normalizeVector(velocity);
+
+  return {
+    x: clamp(ball.pos.x + direction.x * stopDistance, 0.02, 0.98),
+    y: clamp(ball.pos.y + direction.y * stopDistance, 0.03, 0.97),
+  };
+}
 
 function setControlledBall(
   state: MatchState,
@@ -1332,18 +1580,18 @@ function updateOffBallRuns(state: MatchState): void {
 
       const roleFactor =
         player.role === "OFFENSIVE"
-          ? 1.45
+          ? 1.08
           : player.role === "CREATOR"
-            ? 1.1
+            ? 1.03
             : player.role === "DEFENSIVE"
-              ? 0.35
+              ? 0.85
               : 1;
 
       const chance =
         MATCH_CONFIG.offBallRuns.baseChancePerDecision *
         positionFactor *
         roleFactor *
-        (0.55 + 0.45 * stats.intelligence / 100);
+        (0.75 + 0.25 * stats.intelligence / 100);
 
       if (!state.rng.chance(chance)) {
         continue;
@@ -1413,9 +1661,9 @@ function updatePlayerTargets(state: MatchState): void {
       const anchor = anchorForSide(slot.anchor, player.side);
       const roleShift =
         player.role === "OFFENSIVE"
-          ? 0.055
+          ? 0.020
           : player.role === "DEFENSIVE"
-            ? -0.045
+            ? -0.020
             : 0;
 
       const possessionShift = hasPossession ? 0.055 : -0.025;
@@ -1437,7 +1685,7 @@ function updatePlayerTargets(state: MatchState): void {
       } else if (owner) {
         const ballAttraction =
           player.role === "PRESSING"
-            ? 0.26
+            ? 0.17
             : hasPossession
               ? 0.05
               : 0.13;
@@ -1555,10 +1803,17 @@ function updateMovement(state: MatchState, dt: number): void {
     );
 
     const moved = distanceBetween(before, player.pos);
-    const roleCost = player.role === "PRESSING" ? 1.3 : 1;
-    const physicalEfficiency = 1.18 - player.card.stats.physical * 0.004;
+    const roleCost =
+      player.role === "PRESSING"
+        ? MATCH_CONFIG.fatigue.pressingCostMultiplier
+        : 1;
+    const physicalEfficiency = 1.16 - player.card.stats.physical * 0.0035;
     player.energy = clamp(
-      player.energy - moved * 19 * roleCost * physicalEfficiency,
+      player.energy -
+        moved *
+          MATCH_CONFIG.fatigue.distanceEnergyCost *
+          roleCost *
+          physicalEfficiency,
       0,
       100,
     );
@@ -1616,13 +1871,17 @@ function substitutePlayer(
     return false;
   }
 
+  const outgoingIsGoalkeeper = outgoing.assignedPosition === "GK";
   const bench = team.players
     .filter(
       (player) =>
         !player.active &&
         !player.injured &&
         !player.redCard &&
-        player.slotId === null,
+        player.slotId === null &&
+        (outgoingIsGoalkeeper
+          ? player.card.primaryPosition === "GK"
+          : player.card.primaryPosition !== "GK"),
     )
     .sort(
       (a, b) =>
@@ -1956,9 +2215,47 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
+function vectorLength(vector: Vec2): number {
+  return Math.hypot(vector.x, vector.y);
+}
+
+function normalizeVector(vector: Vec2): Vec2 {
+  const length = vectorLength(vector);
+  if (length <= 1e-9) {
+    return { x: 0, y: 0 };
+  }
+  return {
+    x: vector.x / length,
+    y: vector.y / length,
+  };
+}
+
+function rotateVector(vector: Vec2, angle: number): Vec2 {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: vector.x * cos - vector.y * sin,
+    y: vector.x * sin + vector.y * cos,
+  };
+}
+
+function averageStarterEnergy(team: RuntimeTeam): number {
+  const starters = team.players.filter((player) =>
+    player.runtimeId.includes(":START:"),
+  );
+  if (starters.length === 0) {
+    return 100;
+  }
+  return round(
+    starters.reduce((sum, player) => sum + player.energy, 0) /
+      starters.length,
+    1,
+  );
+}
+
 function withoutPossessionTicks(
   stats: RuntimeTeam["stats"],
-): Omit<TeamMatchStats, "possession"> {
+): Omit<TeamMatchStats, "possession" | "averageStarterEnergy"> {
   return {
     shots: stats.shots,
     shotsOnTarget: stats.shotsOnTarget,
