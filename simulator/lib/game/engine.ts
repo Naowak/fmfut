@@ -1,4 +1,5 @@
 import { effectiveStats, positionCompatibility } from "./compatibility";
+import { assertTeamSelection, MATCH_CONTRACT_VERSION } from "./contract";
 import { clamp, ENGINE_VERSION, MATCH_CONFIG, round } from "./config";
 import {
   attackDirection,
@@ -13,6 +14,7 @@ import type {
   MatchEvent,
   MatchReplay,
   MatchSimulationOutput,
+  MatchSimulationInput,
   MatchSpatialAnalytics,
   PlayerCard,
   Position,
@@ -224,15 +226,11 @@ const EMPTY_STATS = () => ({
   possessionTicks: 0,
 });
 
-export function simulateMatch(params: {
-  home: TeamSelection;
-  away: TeamSelection;
-  players: PlayerCard[];
-  seed: string;
-  logicalSeconds?: number;
-  recordReplay?: boolean;
-  recordSpatialAnalytics?: boolean;
-}): MatchSimulationOutput {
+export function simulateMatch(
+  params: MatchSimulationInput,
+): MatchSimulationOutput {
+  assertTeamSelection(params.home);
+  assertTeamSelection(params.away);
   const regulationLogicalDuration = clamp(
     params.logicalSeconds ?? MATCH_CONFIG.logicalSeconds,
     60,
@@ -460,6 +458,7 @@ export function simulateMatch(params: {
   };
 
   return {
+    contractVersion: MATCH_CONTRACT_VERSION,
     result: {
       homeScore: home.score,
       awayScore: away.score,

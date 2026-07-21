@@ -1,24 +1,30 @@
 {
   "name": "fut-manager-nextjs-simulator",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:dataset": "cd .. && python3 -m unittest discover -s dataset/tests -p 'test_*.py'",
+    "test:all": "npm run typecheck && npm test && npm run test:dataset"
   },
   "dependencies": {
     "csv-parse": "7.0.1",
     "next": "16.2.10",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.10"
   },
   "overrides": {
     "postcss": "8.5.10"

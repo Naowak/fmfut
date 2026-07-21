@@ -2,7 +2,7 @@
 
 Prototype de moteur de match pour le projet FUT Manager.
 
-Version moteur : **0.2.0**.
+Version moteur : **0.9.0**. Contrat public : **1.0.0**.
 
 ## Architecture
 
@@ -28,6 +28,12 @@ Il reçoit un replay terminé et l'interpole visuellement.
 
 Même équipe + même configuration + même seed = même match.
 
+Les modules applicatifs importent le moteur depuis `lib/game/index.ts`. Les
+fichiers internes, notamment `engine.ts`, ne constituent pas une API publique.
+
+Les requêtes HTTP sont validées au runtime. Une entrée invalide renvoie un
+statut `400` accompagné d'une liste d'erreurs structurée.
+
 ## Stack
 
 - Next.js 16.2
@@ -44,6 +50,18 @@ Même équipe + même configuration + même seed = même match.
 npm install
 npm run dev
 ```
+
+## Validation
+
+```bash
+npm run test:all
+npm run build
+```
+
+La suite couvre actuellement le déterminisme, les bornes spatiales, l'absence
+de valeurs non finies, la cohérence buts/score, la limite de remplacements et la
+validation des compositions. Le pipeline Python dispose de ses propres tests
+de reconstruction SQLite.
 
 Puis ouvrir :
 

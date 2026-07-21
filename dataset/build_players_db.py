@@ -24,8 +24,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from Code.fmfut.dataset.positions import map_positions, parse_source_positions
-from Code.fmfut.dataset.stat_formulas import SOURCE_STAT_COLUMNS, calculate_game_stats
+try:
+    # Import package (`python -m dataset.build_players_db`).
+    from .positions import map_positions, parse_source_positions
+    from .stat_formulas import SOURCE_STAT_COLUMNS, calculate_game_stats
+except ImportError:
+    # Exécution directe documentée (`python dataset/build_players_db.py`).
+    from positions import map_positions, parse_source_positions
+    from stat_formulas import SOURCE_STAT_COLUMNS, calculate_game_stats
 
 
 REQUIRED_COLUMNS = {

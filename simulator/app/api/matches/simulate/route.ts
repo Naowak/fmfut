@@ -1,19 +1,26 @@
 import { NextResponse } from "next/server";
+import { ZodError } from "zod";
 import { loadPlayersFromCsv } from "@/lib/data/load-players";
-import { simulateMatch } from "@/lib/game/engine";
+import {
+  parseMatchSimulationRequest,
+  simulateMatch,
+} from "@/lib/game";
 import {
   assertSelectionPlayersExist,
   DEFAULT_AWAY_SELECTION,
   DEFAULT_HOME_SELECTION,
 } from "@/lib/game/sample-teams";
-import type { MatchSimulationRequest } from "@/lib/game/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json().catch(() => ({}))) as MatchSimulationRequest;
+    const body = parseMatchSimulationRequest(
+      await request.json().catch(() => {
+        throw new SyntaxError("Corps JSON invalide.");
+      }),
+    );
     const players = loadPlayersFromCsv();
 
     const home = body.home ?? DEFAULT_HOME_SELECTION;
@@ -40,6 +47,26 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
+    if (error instanceof ZodError) {
+      return NextResponse.json(
+        {
+          error: "Requête de simulation invalide.",
+          issues: error.issues.map((issue) => ({
+            path: issue.path.join("."),
+            message: issue.message,
+          })),
+        },
+        { status: 400 },
+      );
+    }
+
+    if (error instanceof SyntaxError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 },
+      );
+    }
+
     console.error(error);
 
     return NextResponse.json(

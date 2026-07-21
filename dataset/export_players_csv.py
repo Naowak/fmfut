@@ -34,17 +34,29 @@ ORDER BY overall DESC, short_name ASC
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--db_path", type=Path)
-    parser.add_argument("--output_csv", type=Path)
+    parser.add_argument("db_path", nargs="?", type=Path)
+    parser.add_argument("output_csv", nargs="?", type=Path)
+    parser.add_argument("--db-path", "--db_path", dest="db_path_option", type=Path)
+    parser.add_argument(
+        "--output-csv",
+        "--output_csv",
+        dest="output_csv_option",
+        type=Path,
+    )
     args = parser.parse_args()
 
-    conn = sqlite3.connect(args.db_path)
+    db_path = args.db_path_option or args.db_path
+    output_csv = args.output_csv_option or args.output_csv
+    if db_path is None or output_csv is None:
+        parser.error("db_path et output_csv sont obligatoires")
+
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
     rows = conn.execute(QUERY)
     first = rows.fetchone()
 
-    with args.output_csv.open("w", encoding="utf-8", newline="") as handle:
+    with output_csv.open("w", encoding="utf-8", newline="") as handle:
         if first is None:
             raise SystemExit("La base ne contient aucun joueur.")
 
@@ -56,7 +68,7 @@ def main() -> None:
             writer.writerow(dict(row))
 
     conn.close()
-    print(f"Export créé : {args.output_csv.resolve()}")
+    print(f"Export créé : {output_csv.resolve()}")
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ import {
   type SpatialTeamAggregate,
 } from "@/lib/analytics/types";
 import { runMicroBenchmarks } from "@/lib/analytics/micro-benchmarks";
-import { simulateMatch } from "@/lib/game/engine";
+import { simulateMatch } from "@/lib/game";
 import {
   assertSelectionPlayersExist,
   DEFAULT_AWAY_SELECTION,

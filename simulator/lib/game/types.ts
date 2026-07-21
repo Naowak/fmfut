@@ -65,10 +65,21 @@ export interface TeamSelection {
 }
 
 export interface MatchSimulationRequest {
+  contractVersion?: "1.0.0";
   seed?: string;
   logicalSeconds?: number;
   home?: TeamSelection;
   away?: TeamSelection;
+}
+
+export interface MatchSimulationInput {
+  home: TeamSelection;
+  away: TeamSelection;
+  players: PlayerCard[];
+  seed: string;
+  logicalSeconds?: number;
+  recordReplay?: boolean;
+  recordSpatialAnalytics?: boolean;
 }
 
 export interface ReplayPlayerMeta {
@@ -215,6 +226,7 @@ export interface MatchReplay {
 }
 
 export interface MatchSimulationOutput {
+  contractVersion: "1.0.0";
   result: {
     homeScore: number;
     awayScore: number;

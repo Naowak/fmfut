@@ -31,25 +31,25 @@ Aucune dépendance externe.
 ## Construire la base
 
 ```bash
-python build_players_db.py chemin/vers/players.csv players.db --replace
+python dataset/build_players_db.py chemin/vers/players.csv dataset/players.db --replace
 ```
 
 Si le CSV contient plusieurs versions FIFA :
 
 ```bash
-python build_players_db.py players.csv players.db --fifa-version 26 --replace
+python dataset/build_players_db.py players.csv dataset/players.db --fifa-version 26 --replace
 ```
 
 Pour tester sur un petit sous-ensemble :
 
 ```bash
-python build_players_db.py players.csv test.db --limit 1000 --replace
+python dataset/build_players_db.py players.csv test.db --limit 1000 --replace
 ```
 
 Pour ne conserver que les joueurs avec un overall source >= 60 :
 
 ```bash
-python build_players_db.py players.csv players.db --min-overall 60 --replace
+python dataset/build_players_db.py players.csv dataset/players.db --min-overall 60 --replace
 ```
 
 ## Inspecter la base
@@ -57,25 +57,35 @@ python build_players_db.py players.csv players.db --min-overall 60 --replace
 Top 20 :
 
 ```bash
-python inspect_players_db.py players.db
+python dataset/inspect_players_db.py dataset/players.db
 ```
 
 Uniquement les ST :
 
 ```bash
-python inspect_players_db.py players.db --position ST
+python dataset/inspect_players_db.py dataset/players.db --position ST
 ```
 
 Joueurs français :
 
 ```bash
-python inspect_players_db.py players.db --nation France
+python dataset/inspect_players_db.py dataset/players.db --nation France
 ```
 
 ## Réexporter en CSV
 
 ```bash
-python export_players_csv.py players.db players_normalized.csv
+python dataset/export_players_csv.py dataset/players.db players_normalized.csv
+```
+
+Les variantes explicites `--db-path` et `--output-csv` sont également acceptées.
+
+## Tests
+
+Depuis la racine du projet :
+
+```bash
+python3 -m unittest discover -s dataset/tests -p 'test_*.py'
 ```
 
 ## Modifier les formules
