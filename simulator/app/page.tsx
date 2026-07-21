@@ -6,11 +6,11 @@ export default function HomePage() {
     <main className="page-shell">
       <header className="hero">
         <div>
-          <p className="eyebrow">FUT MANAGER — PROTOTYPE MOTEUR</p>
+          <p className="eyebrow">FUT MANAGER — MATCH ENGINE</p>
           <h1>Simulateur de match 2D</h1>
           <p className="hero-copy">
-            Le match est calculé entièrement côté serveur à partir d&apos;une seed.
-            Le client reçoit ensuite un replay immuable et ne fait que l&apos;afficher.
+            Configure l'affichage, lance une simulation déterministe puis analyse le replay.
+            Le résultat est calculé intégralement côté serveur avant la première image.
           </p>
         </div>
         <Link className="control-button nav-link" href="/analytics">

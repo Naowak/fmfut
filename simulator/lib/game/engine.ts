@@ -6,6 +6,7 @@ import {
   FORMATION_433,
   getSlot,
   opponentGoal,
+  ownGoal,
 } from "./formations";
 import { SeededRng } from "./rng";
 import type {
@@ -2893,17 +2894,45 @@ function positionPlayersForRestart(
   }
 
   if (restart.type === "PENALTY") {
+    // Les deux gardiens restent dans LEUR propre but. Dans les versions
+    // précédentes, seul le gardien défenseur était exclu du repositionnement
+    // collectif : le gardien de l'équipe qui tirait le penalty pouvait donc
+    // être envoyé près de la surface adverse.
     const defendingKeeper = findActiveBySlot(defendingTeam, "GK");
+    const attackingKeeper = findActiveBySlot(attackingTeam, "GK");
+
     if (defendingKeeper) {
-      defendingKeeper.pos = { x: targetGoal.x, y: 0.5 };
+      const defendedGoal = ownGoal(defendingKeeper.side);
+      defendingKeeper.pos = {
+        x: defendingKeeper.side === "HOME" ? 0.018 : 0.982,
+        y: defendedGoal.y,
+      };
       defendingKeeper.target = { ...defendingKeeper.pos };
     }
+
+    if (attackingKeeper) {
+      const own = ownGoal(attackingKeeper.side);
+      attackingKeeper.pos = {
+        x: attackingKeeper.side === "HOME" ? 0.028 : 0.972,
+        y: own.y,
+      };
+      attackingKeeper.target = { ...attackingKeeper.pos };
+    }
+
     const outsideProgress = 0.78;
     [...attackingTeam.players, ...defendingTeam.players]
-      .filter((player) => player.active && player.runtimeId !== restart.takerId && player.runtimeId !== defendingKeeper?.runtimeId)
+      .filter(
+        (player) =>
+          player.active &&
+          player.runtimeId !== restart.takerId &&
+          player.assignedPosition !== "GK",
+      )
       .forEach((player, index) => {
         player.pos = {
-          x: fromTeamProgress(outsideProgress - (index % 2) * 0.025, attackingTeam.side),
+          x: fromTeamProgress(
+            outsideProgress - (index % 2) * 0.025,
+            attackingTeam.side,
+          ),
           y: clamp(0.28 + (index % 8) * 0.065, 0.24, 0.76),
         };
         player.target = { ...player.pos };

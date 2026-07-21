@@ -97,9 +97,20 @@ export interface SensitivityResult {
   stat: AnalyzedStat;
   boost: number;
   averageGoalDifferenceDelta: number;
+  goalDifferenceStdError: number;
   homeWinRateDelta: number;
   secondaryMetricLabel: string;
   secondaryMetricDelta: number;
+}
+
+export interface MicroBenchmarkResult {
+  stat: AnalyzedStat;
+  label: string;
+  baseline: number;
+  boosted: number;
+  delta: number;
+  unit: "%";
+  samples: number;
 }
 
 export interface RoleExperimentResult {
@@ -115,6 +126,7 @@ export interface MonteCarloResponse {
   baseline: MonteCarloAggregate;
   spatial: MonteCarloSpatialAggregate | null;
   sensitivity: SensitivityResult[];
+  microBenchmarks: MicroBenchmarkResult[];
   roleExperiment: RoleExperimentResult | null;
   notes: string[];
 }

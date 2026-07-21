@@ -26,7 +26,7 @@ const HEATMAP_POSITIONS: Array<"ALL" | Position> = [
 
 export function AnalyticsDashboard() {
   const [runs, setRuns] = useState(50);
-  const [seedPrefix, setSeedPrefix] = useState("balance-v04");
+  const [seedPrefix, setSeedPrefix] = useState("balance-v07");
   const [sensitivity, setSensitivity] = useState(true);
   const [data, setData] = useState<MonteCarloResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -245,7 +245,7 @@ export function AnalyticsDashboard() {
             <section className="card analytics-section">
               <h2>Sensibilité des six statistiques</h2>
               <p className="muted">
-                Même série de seeds, avec +10 sur une seule stat du onze domicile.
+                Même série de seeds, avec +10 sur une seule stat du onze domicile. Le ± correspond à l'erreur standard du delta apparié : plus elle est proche du delta, plus le signal global est bruité.
               </p>
               <div className="sensitivity-list">
                 {[...data.sensitivity]
@@ -260,6 +260,37 @@ export function AnalyticsDashboard() {
                       )}
                     />
                   ))}
+              </div>
+            </section>
+          )}
+
+          {data.microBenchmarks.length > 0 && (
+            <section className="card analytics-section">
+              <div className="analytics-section-header">
+                <div>
+                  <h2>Micro-benchmarks isolés</h2>
+                  <p className="muted">
+                    10 000 situations contrôlées par stat. Ici, un +10 doit améliorer directement la capacité testée, sans divergence chaotique d'un match complet.
+                  </p>
+                </div>
+              </div>
+              <div className="micro-benchmark-grid">
+                {data.microBenchmarks.map((benchmark) => (
+                  <div className="micro-benchmark-card" key={benchmark.stat}>
+                    <div className="micro-benchmark-heading">
+                      <span>{benchmark.stat}</span>
+                      <strong>{benchmark.label}</strong>
+                    </div>
+                    <div className="micro-benchmark-values">
+                      <span>{benchmark.baseline}{benchmark.unit}</span>
+                      <span className="micro-arrow">→</span>
+                      <span>{benchmark.boosted}{benchmark.unit}</span>
+                    </div>
+                    <div className="micro-benchmark-delta" data-negative={benchmark.delta < 0}>
+                      {formatSigned(benchmark.delta)} pts avec +10
+                    </div>
+                  </div>
+                ))}
               </div>
             </section>
           )}
@@ -362,7 +393,7 @@ function SensitivityBar({ item, max }: { item: SensitivityResult; max: number })
       <div className="sensitivity-label">
         <strong>{item.stat}</strong>
         <span>
-          Δ buts {formatSigned(item.averageGoalDifferenceDelta)} · Δ win rate{" "}
+          Δ buts {formatSigned(item.averageGoalDifferenceDelta)} ± {item.goalDifferenceStdError} · Δ win rate{" "}
           {formatSigned(item.homeWinRateDelta)} pts · {item.secondaryMetricLabel}{" "}
           {formatSigned(item.secondaryMetricDelta)}
         </span>

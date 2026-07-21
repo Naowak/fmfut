@@ -1,4 +1,4 @@
-export const ENGINE_VERSION = "0.6.0";
+export const ENGINE_VERSION = "0.7.0";
 
 export const MATCH_CONFIG = {
   displayedMinutes: 90,
@@ -36,8 +36,8 @@ export const MATCH_CONFIG = {
   },
 
   movement: {
-    minSpeedPerLogicalSecond: 0.022,
-    maxSpeedPerLogicalSecond: 0.055,
+    minSpeedPerLogicalSecond: 0.0264,
+    maxSpeedPerLogicalSecond: 0.066,
     controlledBallSpeedMultiplierMin: 0.80,
     controlledBallSpeedMultiplierMax: 0.96,
     shapeRepositionMultiplier: 1.32,

@@ -1,4 +1,4 @@
-# FUT Manager — Next.js 2D Match Simulator
+# FUT Manager — Next.js 2D Match Simulator V0.7
 
 Prototype de moteur de match pour le projet FUT Manager.
 
@@ -544,3 +544,14 @@ La V0.6 corrige la construction basse et le viewer :
 - overlays d'événements responsives ;
 - affichage du but volontairement plus iconique ;
 - timing des overlays décalé après l'action visuelle correspondante.
+
+
+## Nouveautés V0.7
+
+- Boutons de saut `+1s / +2s / +5s / +10s` dans le replay.
+- Joueurs 20 % plus rapides.
+- Correction complète du placement des gardiens sur penalty.
+- Interface du simulateur retravaillée pour servir de viewer principal.
+- Balance Lab : erreur standard sur la sensibilité globale et micro-benchmarks isolés des six statistiques.
+
+Voir `CHANGELOG_V0.7.md` pour le détail.

@@ -8,6 +8,7 @@ import {
   type MonteCarloSpatialAggregate,
   type SpatialTeamAggregate,
 } from "@/lib/analytics/types";
+import { runMicroBenchmarks } from "@/lib/analytics/micro-benchmarks";
 import { simulateMatch } from "@/lib/game/engine";
 import {
   assertSelectionPlayersExist,
@@ -86,6 +87,10 @@ export async function POST(request: Request) {
         })
       : null;
 
+    const microBenchmarks = includeSensitivity
+      ? runMicroBenchmarks(players, 10000)
+      : [];
+
     const response: MonteCarloResponse = {
       seedPrefix,
       runs,
@@ -93,13 +98,16 @@ export async function POST(request: Request) {
       baseline,
       spatial,
       sensitivity,
+      microBenchmarks,
       roleExperiment,
       notes: [
         "Les simulations analytiques tournent avec recordReplay=false : aucun frame Canvas n'est généré.",
         "La baseline enregistre un échantillon spatial par seconde logique pour les heatmaps et les métriques de bloc.",
         "Les expériences de sensibilité utilisent exactement les mêmes seeds que la baseline.",
         "Le boost de +10 est appliqué à la stat testée sur le onze titulaire domicile uniquement.",
-        "La V0.6 mesure aussi les passes arrière, les remises au gardien et les buts contre son camp pour surveiller la construction basse.",
+        "La V0.7 ajoute des micro-benchmarks isolés pour vérifier qu'un +10 améliore directement la capacité concernée, indépendamment du chaos d'un match complet.",
+        "Les deltas de buts affichent aussi leur erreur standard appariée : un delta du même ordre que son incertitude doit être interprété avec prudence.",
+        "La V0.7 conserve les passes arrière, les remises au gardien et les buts contre son camp pour surveiller la construction basse.",
         "Un but n'est plus tiré probabilistiquement : il faut que la balle traverse physiquement la ligne entre les poteaux.",
         "Les heatmaps sont exprimées dans le repère de chaque équipe : notre but en bas, but adverse en haut.",
         "Le moteur ne possède encore qu'une formation 4-3-3 : la comparaison de formations sera ajoutée quand plusieurs formations existeront.",
@@ -228,6 +236,13 @@ function runSensitivityExperiment(params: {
     boostedAggregate,
   );
 
+  const pairedGoalDifferenceDeltas = boostedMatches.map((match, index) => {
+    const baselineMatch = params.baselineMatches[index];
+    return (match.homeScore - match.awayScore) -
+      (baselineMatch.homeScore - baselineMatch.awayScore);
+  });
+  const goalDifferenceStdError = standardError(pairedGoalDifferenceDeltas);
+
   return {
     stat: params.stat,
     boost: params.boost,
@@ -235,6 +250,7 @@ function runSensitivityExperiment(params: {
       boostedGoalDifference - baselineGoalDifference,
       3,
     ),
+    goalDifferenceStdError: round(goalDifferenceStdError, 3),
     homeWinRateDelta: round(
       boostedAggregate.homeWinRate - baselineAggregate.homeWinRate,
       2,
@@ -601,6 +617,15 @@ function average(total: number, count: number): number {
 function round(value: number, digits: number): number {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
+}
+
+function standardError(values: number[]): number {
+  if (values.length <= 1) return 0;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance =
+    values.reduce((sum, value) => sum + (value - mean) ** 2, 0) /
+    (values.length - 1);
+  return Math.sqrt(variance) / Math.sqrt(values.length);
 }
 
 function clampInteger(value: number, min: number, max: number): number {

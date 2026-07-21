@@ -175,6 +175,17 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
 
   const clockLabel = snapshot ? formatMatchClock(snapshot) : "0:00";
 
+  function seekBy(seconds: number) {
+    setTime((previous) => {
+      const next = Math.min(replay.logicalDuration, previous + seconds);
+      if (next >= replay.logicalDuration) setPlaying(false);
+      return next;
+    });
+    setEventOverlay(null);
+    freezeUntilRef.current = 0;
+    overlayUntilRef.current = 0;
+  }
+
   return (
     <div className="match-view-grid">
       <div className="pitch-column">
@@ -182,11 +193,17 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
           className="match-scoreboard"
           style={{ maxWidth: `${pitchMaxWidth}px` }}
         >
-          <span className="score-team">{replay.homeName}</span>
+          <span className="score-team score-team-home">
+            <i className="score-team-dot" style={{ background: homeColor }} />
+            {replay.homeName}
+          </span>
           <span className="score-value">
             {liveScore.home} - {liveScore.away}
           </span>
-          <span className="score-team">{replay.awayName}</span>
+          <span className="score-team score-team-away">
+            {replay.awayName}
+            <i className="score-team-dot" style={{ background: awayColor }} />
+          </span>
           <span className="scoreboard-clock">{clockLabel}</span>
         </div>
 
@@ -230,63 +247,82 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
           )}
         </div>
 
-        <div className="replay-controls">
-          <button
-            type="button"
-            className="control-button"
-            onClick={() => {
-              if (time >= replay.logicalDuration) {
-                setTime(0);
-                setPlaying(true);
-                setEventOverlay(null);
-                freezeUntilRef.current = 0;
-                overlayUntilRef.current = 0;
-                handledPauseEventsRef.current.clear();
-                return;
-              }
-              setPlaying((value) => !value);
-            }}
-          >
-            {playing
-              ? "Pause"
-              : time >= replay.logicalDuration
-                ? "Rejouer"
-                : "Lecture"}
-          </button>
+        <div className="replay-controls replay-controls-v07">
+          <div className="transport-controls">
+            <button
+              type="button"
+              className="control-button transport-main-button"
+              onClick={() => {
+                if (time >= replay.logicalDuration) {
+                  setTime(0);
+                  setPlaying(true);
+                  setEventOverlay(null);
+                  freezeUntilRef.current = 0;
+                  overlayUntilRef.current = 0;
+                  handledPauseEventsRef.current.clear();
+                  return;
+                }
+                setPlaying((value) => !value);
+              }}
+            >
+              {playing
+                ? "❚❚ Pause"
+                : time >= replay.logicalDuration
+                  ? "↻ Rejouer"
+                  : "▶ Lecture"}
+            </button>
 
-          <div className="speed-buttons">
-            {([1, 2, 4] as const).map((value) => (
+            <div className="speed-buttons" aria-label="Vitesse de lecture">
+              {([1, 2, 4] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className="control-button"
+                  data-active={speed === value}
+                  onClick={() => setSpeed(value)}
+                  title={`Lecture ×${value}`}
+                >
+                  ×{value}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="seek-controls" aria-label="Avancer dans le replay">
+            <span className="seek-label">Avancer</span>
+            {[1, 2, 5, 10].map((seconds) => (
               <button
-                key={value}
+                key={seconds}
                 type="button"
-                className="control-button"
-                data-active={speed === value}
-                onClick={() => setSpeed(value)}
+                className="control-button seek-button"
+                onClick={() => seekBy(seconds)}
+                disabled={time >= replay.logicalDuration}
               >
-                ×{value}
+                +{seconds}s
               </button>
             ))}
           </div>
 
-          <input
-            type="range"
-            min={0}
-            max={replay.logicalDuration}
-            step={0.1}
-            value={time}
-            onChange={(event) => {
-              setTime(Number(event.target.value));
-              setPlaying(false);
-              setEventOverlay(null);
-              freezeUntilRef.current = 0;
-              overlayUntilRef.current = 0;
-            }}
-            aria-label="Position dans le replay"
-          />
-
-          <span className="muted">
-            {Math.round(time)}s / {replay.logicalDuration}s
-          </span>
+          <div className="timeline-row">
+            <input
+              type="range"
+              min={0}
+              max={replay.logicalDuration}
+              step={0.1}
+              value={time}
+              onChange={(event) => {
+                setTime(Number(event.target.value));
+                setPlaying(false);
+                setEventOverlay(null);
+                freezeUntilRef.current = 0;
+                overlayUntilRef.current = 0;
+              }}
+              aria-label="Position dans le replay"
+            />
+            <span className="replay-time-label">
+              {Math.round(time)}s / {replay.logicalDuration}s
+            </span>
+          </div>
         </div>
 
         <div className="result-banner">
@@ -369,11 +405,29 @@ function SubstitutionToast({
 
 function EventLine({ event }: { event: MatchEvent }) {
   return (
-    <div className="event-item">
+    <div className={`event-item event-item-${event.type.toLowerCase()}`}>
+      <span className="event-type-icon" aria-hidden="true">{eventIcon(event)}</span>
       <span className="event-minute">{event.clockLabel ?? "—"}</span>
-      {event.message}
+      <span>{event.message}</span>
     </div>
   );
+}
+
+function eventIcon(event: MatchEvent): string {
+  switch (event.type) {
+    case "GOAL": return "⚽";
+    case "SHOT": return "↗";
+    case "SAVE": return "◆";
+    case "YELLOW_CARD": return "▰";
+    case "RED_CARD": return "■";
+    case "SUBSTITUTION": return "↕";
+    case "INJURY": return "+";
+    case "CORNER": return "⌜";
+    case "FREE_KICK": return "◉";
+    case "PENALTY": return "◎";
+    case "OFFSIDE": return "⚑";
+    default: return "·";
+  }
 }
 
 function isInterestingEvent(event: MatchEvent): boolean {

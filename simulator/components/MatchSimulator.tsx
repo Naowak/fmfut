@@ -60,7 +60,19 @@ export function MatchSimulator() {
   return (
     <section className="simulator-shell">
       <div className="card main-card">
-        <div className="toolbar">
+        <div className="simulator-config-header">
+          <div>
+            <span className="config-kicker">SIMULATION</span>
+            <h2>Préparer et lancer un match</h2>
+            <p>Le résultat est calculé côté serveur, puis rejoué à l'identique dans le viewer.</p>
+          </div>
+          <div className="engine-status">
+            <span className="engine-status-dot" />
+            Moteur déterministe · v0.7
+          </div>
+        </div>
+
+        <div className="toolbar toolbar-v07">
           <div className="field-group">
             <label htmlFor="seed">Seed déterministe</label>
             <input
@@ -106,7 +118,7 @@ export function MatchSimulator() {
             onClick={runSimulation}
             disabled={loading}
           >
-            {loading ? "Simulation…" : "Simuler le match"}
+            {loading ? "Simulation…" : "▶ Simuler le match"}
           </button>
 
           <button
@@ -120,7 +132,7 @@ export function MatchSimulator() {
               )
             }
           >
-            Nouvelle seed
+            ↻ Nouvelle seed
           </button>
         </div>
 
