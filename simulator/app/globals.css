@@ -577,3 +577,106 @@ h1 {
 @media (max-width: 520px) {
   .spatial-metrics { grid-template-columns: 1fr; }
 }
+
+/* V0.6 — overlays d'événements plus lisibles et responsives */
+.match-event-overlay,
+.goal-event-overlay {
+  --event-color: #ffffff;
+  position: absolute;
+  left: 50%;
+  z-index: 9;
+  width: min(340px, calc(100% - 28px));
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
+
+.match-event-overlay {
+  top: 18px;
+  display: grid;
+  gap: 3px;
+  padding: 9px 14px;
+  border: 1px solid color-mix(in srgb, var(--event-color) 68%, white 12%);
+  border-left: 4px solid var(--event-color);
+  border-radius: 10px;
+  background: rgba(8, 13, 18, 0.91);
+  box-shadow: 0 12px 34px rgba(0,0,0,.28);
+  backdrop-filter: blur(9px);
+  animation: event-banner-in 220ms ease-out;
+}
+
+.match-event-overlay strong {
+  color: var(--event-color);
+  font-size: clamp(11px, 2.4vw, 14px);
+  line-height: 1.15;
+  letter-spacing: .08em;
+}
+
+.match-event-overlay span {
+  color: #d7dde3;
+  font-size: clamp(9px, 2vw, 12px);
+  line-height: 1.3;
+}
+
+.goal-event-overlay {
+  top: 50%;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: clamp(14px, 3vw, 22px);
+  transform: translate(-50%, -50%);
+  border: 2px solid var(--event-color);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 50% 15%, color-mix(in srgb, var(--event-color) 24%, transparent), transparent 58%),
+    rgba(5, 10, 15, 0.94);
+  box-shadow:
+    0 24px 70px rgba(0,0,0,.48),
+    0 0 34px color-mix(in srgb, var(--event-color) 26%, transparent);
+  animation: goal-iconic-in 380ms cubic-bezier(.18,.9,.25,1.12);
+}
+
+.goal-event-icon {
+  font-size: clamp(28px, 8vw, 48px);
+  line-height: 1;
+  filter: drop-shadow(0 7px 14px rgba(0,0,0,.4));
+}
+
+.goal-event-overlay strong {
+  color: #ffffff;
+  font-size: clamp(24px, 7vw, 46px);
+  line-height: .95;
+  letter-spacing: .12em;
+  text-shadow: 0 0 22px color-mix(in srgb, var(--event-color) 55%, transparent);
+}
+
+.goal-event-overlay span {
+  max-width: 100%;
+  color: #e7ebef;
+  font-size: clamp(10px, 2.3vw, 13px);
+  line-height: 1.35;
+}
+
+@keyframes event-banner-in {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@keyframes goal-iconic-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(.72); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@media (max-width: 520px) {
+  .match-event-overlay {
+    top: 10px;
+    width: calc(100% - 18px);
+    padding: 7px 10px;
+  }
+
+  .goal-event-overlay {
+    width: calc(100% - 24px);
+    border-radius: 14px;
+  }
+}

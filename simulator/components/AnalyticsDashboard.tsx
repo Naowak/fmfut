@@ -159,6 +159,9 @@ export function AnalyticsDashboard() {
                 <MetricRow label="Buts" home={data.baseline.averageHomeGoals} away={data.baseline.averageAwayGoals} />
                 <MetricRow label="Tirs" home={data.baseline.averageHomeShots} away={data.baseline.averageAwayShots} />
                 <MetricRow label="Passes tentées" home={data.baseline.averageHomePasses} away={data.baseline.averageAwayPasses} />
+                <MetricRow label="Passes arrière" home={data.baseline.averageHomeBackwardPasses} away={data.baseline.averageAwayBackwardPasses} />
+                <MetricRow label="Remises au gardien" home={data.baseline.averageHomeGoalkeeperBackPasses} away={data.baseline.averageAwayGoalkeeperBackPasses} />
+                <MetricRow label="Buts contre son camp" home={data.baseline.averageHomeOwnGoals} away={data.baseline.averageAwayOwnGoals} />
                 <MetricRow label="Dribbles / progressions balle au pied" home={data.baseline.averageHomeDribbles} away={data.baseline.averageAwayDribbles} />
                 <MetricRow label="Appels progressifs" home={data.baseline.averageHomeProgressiveRuns} away={data.baseline.averageAwayProgressiveRuns} />
                 <MetricRow label="Duels gagnés" home={data.baseline.averageHomeDuelsWon} away={data.baseline.averageAwayDuelsWon} />

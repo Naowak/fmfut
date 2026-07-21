@@ -184,6 +184,9 @@ export function MatchSimulator() {
                   home={`${match.stats.home.passesCompleted}/${match.stats.home.passesAttempted}`}
                   away={`${match.stats.away.passesCompleted}/${match.stats.away.passesAttempted}`}
                 />
+                <StatRow label="Passes arrière" home={match.stats.home.backwardPasses} away={match.stats.away.backwardPasses} />
+                <StatRow label="Remises au gardien" home={match.stats.home.goalkeeperBackPasses} away={match.stats.away.goalkeeperBackPasses} />
+                <StatRow label="Buts contre son camp" home={match.stats.home.ownGoals} away={match.stats.away.ownGoals} />
                 <StatRow label="Dribbles" home={match.stats.home.dribbles} away={match.stats.away.dribbles} />
                 <StatRow
                   label="Appels"

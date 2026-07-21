@@ -147,6 +147,9 @@ export interface TeamMatchStats {
   shotsOnTarget: number;
   passesAttempted: number;
   passesCompleted: number;
+  backwardPasses: number;
+  goalkeeperBackPasses: number;
+  ownGoals: number;
   dribbles: number;
   progressiveRuns: number;
   duelsWon: number;

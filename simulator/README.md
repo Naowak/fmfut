@@ -532,22 +532,15 @@ Les couleurs des équipes sont configurables dans le viewer parmi huit choix. Le
 
 Le Balance Lab expose maintenant l'énergie moyenne finale des titulaires pour suivre le calibrage de la fatigue.
 
----
+## V0.6
 
-## V0.5 — règles physiques et coups de pied arrêtés
+La V0.6 corrige la construction basse et le viewer :
 
-La V0.5 fait évoluer le moteur vers une simulation où les événements sont déclenchés par la position réelle du ballon :
-
-- contrôle uniquement au contact réel de la balle ;
-- tirs sans résultat pré-calculé ;
-- but uniquement lorsque le ballon franchit réellement la ligne entre les poteaux ;
-- gardien obligé d'atteindre physiquement la trajectoire ;
-- touches, corners et six mètres ;
-- coups francs avec mur sur les positions dangereuses ;
-- penalties ;
-- repositionnement complet lors des arrêts de jeu ;
-- pauses visuelles des événements, y compris en ×4 ;
-- temps additionnel par mi-temps ;
-- nouvelles métriques Monte-Carlo sur les coups de pied arrêtés et le temps additionnel.
-
-Voir `CHANGELOG_V0.5.md` pour les détails.
+- réduction des passes arrière sans intérêt ;
+- back-pass au gardien sécurisée et contrôlée au pied ;
+- métriques Monte-Carlo dédiées aux passes arrière/remises au gardien/CSC ;
+- lecture ×2 par défaut ;
+- gardiens visuellement distincts ;
+- overlays d'événements responsives ;
+- affichage du but volontairement plus iconique ;
+- timing des overlays décalé après l'action visuelle correspondante.

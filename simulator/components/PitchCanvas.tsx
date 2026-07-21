@@ -23,13 +23,15 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationRef = useRef<number | null>(null);
   const lastTimestampRef = useRef<number | null>(null);
-  const eventPauseUntilRef = useRef(0);
+  const freezeUntilRef = useRef(0);
+  const overlayUntilRef = useRef(0);
   const handledPauseEventsRef = useRef(new Set<string>());
 
   const [time, setTime] = useState(0);
   const [eventOverlay, setEventOverlay] = useState<MatchEvent | null>(null);
   const [playing, setPlaying] = useState(true);
-  const [speed, setSpeed] = useState<1 | 2 | 4>(1);
+  // ×2 est le rythme normal du jeu. ×1 reste disponible pour inspecter une action.
+  const [speed, setSpeed] = useState<1 | 2 | 4>(2);
 
   const metadata = useMemo(
     () => new Map(replay.players.map((player) => [player.runtimeId, player])),
@@ -40,7 +42,8 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
     setTime(0);
     setPlaying(true);
     setEventOverlay(null);
-    eventPauseUntilRef.current = 0;
+    freezeUntilRef.current = 0;
+    overlayUntilRef.current = 0;
     handledPauseEventsRef.current.clear();
     lastTimestampRef.current = null;
   }, [replay]);
@@ -54,13 +57,17 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
       const deltaSeconds = (timestamp - lastTimestampRef.current) / 1000;
       lastTimestampRef.current = timestamp;
 
-      if (eventPauseUntilRef.current > 0) {
-        if (timestamp < eventPauseUntilRef.current) {
+      if (overlayUntilRef.current > 0 && timestamp >= overlayUntilRef.current) {
+        overlayUntilRef.current = 0;
+        setEventOverlay(null);
+      }
+
+      if (freezeUntilRef.current > 0) {
+        if (timestamp < freezeUntilRef.current) {
           animationRef.current = requestAnimationFrame(tick);
           return;
         }
-        eventPauseUntilRef.current = 0;
-        setEventOverlay(null);
+        freezeUntilRef.current = 0;
       }
 
       if (playing) {
@@ -71,22 +78,26 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
           );
 
           const crossedEvent = replay.events.find((event) => {
-            const pauseMs = pauseDurationForEvent(event);
-            if (pauseMs <= 0) return false;
+            const overlayMs = overlayDurationForEvent(event);
+            if (overlayMs <= 0) return false;
+            const displayAt = eventDisplayTime(event, replay.logicalDuration);
             const key = `${event.t}-${event.type}-${event.runtimeId ?? event.playerId ?? event.message}`;
             return (
-              event.t > previous + 1e-6 &&
-              event.t <= next + 1e-6 &&
+              displayAt > previous + 1e-6 &&
+              displayAt <= next + 1e-6 &&
               !handledPauseEventsRef.current.has(key)
             );
           });
 
           if (crossedEvent) {
             const key = `${crossedEvent.t}-${crossedEvent.type}-${crossedEvent.runtimeId ?? crossedEvent.playerId ?? crossedEvent.message}`;
+            const displayAt = eventDisplayTime(crossedEvent, replay.logicalDuration);
             handledPauseEventsRef.current.add(key);
             setEventOverlay(crossedEvent);
-            eventPauseUntilRef.current = timestamp + pauseDurationForEvent(crossedEvent);
-            return crossedEvent.t;
+            overlayUntilRef.current = timestamp + overlayDurationForEvent(crossedEvent);
+            const freezeMs = freezeDurationForEvent(crossedEvent);
+            freezeUntilRef.current = freezeMs > 0 ? timestamp + freezeMs : 0;
+            return displayAt;
           }
 
           if (next >= replay.logicalDuration) {
@@ -191,20 +202,16 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
           />
 
           {eventOverlay && (
-            <div
-              className="goal-celebration"
-              style={{
-                borderColor:
-                  eventOverlay.team === "HOME"
-                    ? homeColor
-                    : eventOverlay.team === "AWAY"
-                      ? awayColor
-                      : "#ffffff",
-              }}
-            >
-              <strong>{eventTitle(eventOverlay)}</strong>
-              <span>{eventOverlay.message}</span>
-            </div>
+            <EventOverlay
+              event={eventOverlay}
+              color={
+                eventOverlay.team === "HOME"
+                  ? homeColor
+                  : eventOverlay.team === "AWAY"
+                    ? awayColor
+                    : "#ffffff"
+              }
+            />
           )}
 
           {visibleSubstitutions.home && (
@@ -232,7 +239,8 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
                 setTime(0);
                 setPlaying(true);
                 setEventOverlay(null);
-                eventPauseUntilRef.current = 0;
+                freezeUntilRef.current = 0;
+                overlayUntilRef.current = 0;
                 handledPauseEventsRef.current.clear();
                 return;
               }
@@ -270,7 +278,8 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
               setTime(Number(event.target.value));
               setPlaying(false);
               setEventOverlay(null);
-              eventPauseUntilRef.current = 0;
+              freezeUntilRef.current = 0;
+              overlayUntilRef.current = 0;
             }}
             aria-label="Position dans le replay"
           />
@@ -310,6 +319,25 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
           )}
         </div>
       </aside>
+    </div>
+  );
+}
+
+function EventOverlay({ event, color }: { event: MatchEvent; color: string }) {
+  if (event.type === "GOAL") {
+    return (
+      <div className="goal-event-overlay" style={{ "--event-color": color } as React.CSSProperties}>
+        <div className="goal-event-icon">⚽</div>
+        <strong>BUT</strong>
+        <span>{event.message.replace(/^BUT !\s*/i, "")}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="match-event-overlay" style={{ "--event-color": color } as React.CSSProperties}>
+      <strong>{eventTitle(event)}</strong>
+      <span>{event.message}</span>
     </div>
   );
 }
@@ -497,19 +525,42 @@ function drawScene(
     const radius = 13;
     const playerColor = meta.team === "HOME" ? homeColor : awayColor;
 
-    ctx.beginPath();
-    ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
-    ctx.fillStyle = playerColor;
-    ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "rgba(255,255,255,0.92)";
-    ctx.stroke();
+    const isGoalkeeper = meta.position === "GK";
+
+    if (isGoalkeeper) {
+      // Le gardien garde la couleur de son équipe, mais adopte une silhouette
+      // en losange et une double bordure dorée pour être identifiable
+      // instantanément au milieu des joueurs de champ.
+      ctx.save();
+      ctx.translate(screen.x, screen.y);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = playerColor;
+      ctx.fillRect(-radius * 0.78, -radius * 0.78, radius * 1.56, radius * 1.56);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#facc15";
+      ctx.strokeRect(-radius * 0.78, -radius * 0.78, radius * 1.56, radius * 1.56);
+      ctx.restore();
+
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, radius + 4, 0, Math.PI * 2);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "rgba(255,255,255,0.88)";
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = playerColor;
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(255,255,255,0.92)";
+      ctx.stroke();
+    }
 
     ctx.fillStyle = contrastText(playerColor);
-    ctx.font = "800 11px sans-serif";
+    ctx.font = isGoalkeeper ? "900 9px sans-serif" : "800 11px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(String(meta.shirtNumber), screen.x, screen.y);
+    ctx.fillText(isGoalkeeper ? "GK" : String(meta.shirtNumber), screen.x, screen.y);
 
     ctx.font = "600 10px sans-serif";
     ctx.textBaseline = "top";
@@ -622,23 +673,56 @@ function formatMatchClock(frame: ReplayFrame): string {
   return `${period === 1 ? 45 : 90}+${Math.floor(addedSeconds / 60) + 1}`;
 }
 
-function pauseDurationForEvent(event: MatchEvent): number {
+function overlayDurationForEvent(event: MatchEvent): number {
   switch (event.type) {
-    case "GOAL": return 2800;
-    case "PENALTY": return 2400;
-    case "HALF_TIME": return 2200;
+    case "GOAL": return 2600;
+    case "PENALTY": return 1700;
+    case "HALF_TIME": return 1800;
     case "CORNER":
-    case "FREE_KICK": return 1700;
-    case "INJURY": return 1900;
-    case "RED_CARD": return 1700;
-    case "YELLOW_CARD": return 1200;
-    case "SUBSTITUTION": return 1400;
+    case "FREE_KICK": return 1450;
+    case "INJURY": return 1700;
+    case "RED_CARD": return 1600;
+    case "YELLOW_CARD": return 1100;
+    case "SUBSTITUTION": return 1300;
     case "THROW_IN":
     case "GOAL_KICK":
-    case "OFFSIDE": return 1200;
+    case "OFFSIDE": return 1050;
     case "ADDED_TIME": return 1000;
     default: return 0;
   }
+}
+
+function freezeDurationForEvent(event: MatchEvent): number {
+  switch (event.type) {
+    // Les coups de pied arrêtés ont déjà leur arrêt de jeu dans le replay.
+    // Leur bandeau reste visible sans figer le ballon au moment de la remise.
+    case "GOAL": return 2100;
+    case "HALF_TIME": return 1500;
+    case "INJURY": return 1100;
+    case "RED_CARD": return 900;
+    case "YELLOW_CARD": return 600;
+    case "SUBSTITUTION": return 750;
+    default: return 0;
+  }
+}
+
+function eventDisplayTime(event: MatchEvent, logicalDuration: number): number {
+  const delay = (() => {
+    switch (event.type) {
+      // Le but est affiché APRES le franchissement visuel de la ligne.
+      case "GOAL": return 0.12;
+      // Les arrêts de jeu ordinaires sont annoncés au milieu du
+      // repositionnement, pas avant que l'action précédente soit visible.
+      case "PENALTY": return 1.55;
+      case "CORNER": return 1.05;
+      case "FREE_KICK": return 1.10;
+      case "THROW_IN": return 0.62;
+      case "GOAL_KICK": return 0.85;
+      case "OFFSIDE": return 0.80;
+      default: return 0.08;
+    }
+  })();
+  return Math.min(logicalDuration, event.t + delay);
 }
 
 function eventTitle(event: MatchEvent): string {

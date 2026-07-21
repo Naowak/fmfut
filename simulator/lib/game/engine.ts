@@ -198,6 +198,9 @@ const EMPTY_STATS = () => ({
   shotsOnTarget: 0,
   passesAttempted: 0,
   passesCompleted: 0,
+  backwardPasses: 0,
+  goalkeeperBackPasses: 0,
+  ownGoals: 0,
   dribbles: 0,
   progressiveRuns: 0,
   duelsWon: 0,
@@ -641,6 +644,8 @@ function chooseBallAction(
   const candidates: ActionCandidate[] = [];
   const shotQuality = estimateShotQuality(owner.pos, owner.side);
   const controlAge = state.t - state.controlStartedAt;
+  const nearestOpponentDistance = nearestDistance(owner.pos, opponents);
+  const ownerPressure = clamp((0.11 - nearestOpponentDistance) / 0.11);
 
   if (shotQuality > 0.055) {
     candidates.push({
@@ -662,18 +667,43 @@ function chooseBallAction(
     }
 
     const direction = attackDirection(owner.side);
-    const progression = clamp(
-      ((teammate.pos.x - owner.pos.x) * direction + 0.15) / 0.55,
-    );
+    const rawProgress = (teammate.pos.x - owner.pos.x) * direction;
+    const progression = clamp((rawProgress + 0.15) / 0.55);
+    const backwardAmount = clamp(-rawProgress / 0.30);
     const receiverSpace = clamp(nearestDistance(teammate.pos, opponents) / 0.16);
     const laneSafety = 1 - passingLaneRisk(owner.pos, teammate.pos, opponents);
     const distanceComfort = 1 - clamp(distance / 0.55);
 
     let utility =
-      0.31 * progression +
-      0.29 * receiverSpace +
-      0.28 * laneSafety +
+      0.34 * progression +
+      0.27 * receiverSpace +
+      0.27 * laneSafety +
       0.12 * distanceComfort;
+
+    if (backwardAmount > 0) {
+      utility -=
+        MATCH_CONFIG.passing.backwardPenalty * backwardAmount *
+        (1 - ownerPressure * MATCH_CONFIG.passing.backwardPressureRelief);
+
+      // Les grosses remises de 10%+ de longueur de terrain ne sont retenues
+      // qu'en vraie situation de pression. Cela conserve les passes de soutien
+      // sans produire des renversements arrière artificiels en permanence.
+      if (rawProgress < -0.10 && ownerPressure < 0.55) {
+        utility -= 0.34 * (1 - ownerPressure);
+      }
+    }
+
+    if (teammate.assignedPosition === "GK") {
+      // Le gardien reste une soupape sous pression, pas une destination de
+      // circulation normale. Cela évite les remises arrière absurdes et les
+      // séries défenseur -> gardien sans nécessité.
+      utility -= MATCH_CONFIG.passing.goalkeeperBasePenalty;
+      utility += ownerPressure * MATCH_CONFIG.passing.goalkeeperPressureRelief;
+      if (distance < 0.20) utility += 0.08;
+      if (owner.assignedPosition === "CB" || owner.assignedPosition === "LB" || owner.assignedPosition === "RB") {
+        utility += 0.04 * ownerPressure;
+      }
+    }
 
     if (team.selection.tactics?.buildUp === "SHORT") {
       utility += 0.12 * distanceComfort;
@@ -818,8 +848,23 @@ function startPass(
     synergyBonus: passer.synergyBonus,
   });
 
-  const receiverTarget =
-    receiver.runTarget && receiver.runUntil > state.t
+  const isGoalkeeperBackPass =
+    receiver.assignedPosition === "GK" && receiver.teamIndex === passer.teamIndex;
+
+  const receiverTarget = isGoalkeeperBackPass
+    ? {
+        // On vise volontairement quelques mètres DEVANT le gardien, côté
+        // terrain. Une remise au gardien ne doit jamais être calibrée comme
+        // une passe qui s'arrête sur la ligne de but.
+        x: clamp(
+          receiver.pos.x +
+            attackDirection(receiver.side) * MATCH_CONFIG.passing.goalkeeperSafeLead,
+          0.04,
+          0.96,
+        ),
+        y: receiver.pos.y,
+      }
+    : receiver.runTarget && receiver.runUntil > state.t
       ? {
           x: lerp(receiver.pos.x, receiver.runTarget.x, 0.58),
           y: lerp(receiver.pos.y, receiver.runTarget.y, 0.58),
@@ -847,7 +892,8 @@ function startPass(
   const errorMagnitude =
     (1 - passQuality) *
     (0.018 + distance * 0.11) *
-    (0.75 + pressure * 0.75 + laneRisk * 0.55);
+    (0.75 + pressure * 0.75 + laneRisk * 0.55) *
+    (isGoalkeeperBackPass ? MATCH_CONFIG.passing.goalkeeperErrorMultiplier : 1);
   const errorAngle = state.rng.between(0, Math.PI * 2);
 
   const target = {
@@ -870,11 +916,16 @@ function startPass(
   const powerError =
     state.rng.between(-0.22, 0.22) *
     (1 - passQuality) *
-    (1 + pressure * 0.5);
+    (1 + pressure * 0.5) *
+    (isGoalkeeperBackPass
+      ? MATCH_CONFIG.passing.goalkeeperPowerErrorMultiplier
+      : 1);
   const kickSpeed = clamp(
-    idealSpeed * (1 + powerError),
+    idealSpeed *
+      (1 + powerError) *
+      (isGoalkeeperBackPass ? MATCH_CONFIG.passing.goalkeeperSpeedMultiplier : 1),
     MATCH_CONFIG.ball.passMinSpeed,
-    MATCH_CONFIG.ball.passMaxSpeed,
+    isGoalkeeperBackPass ? 0.25 : MATCH_CONFIG.ball.passMaxSpeed,
   );
 
   const direction = normalizeVector({
@@ -883,6 +934,10 @@ function startPass(
   });
 
   team.stats.passesAttempted += 1;
+  const passProgress =
+    (receiverTarget.x - kickOrigin.x) * attackDirection(passer.side);
+  if (passProgress < -0.025) team.stats.backwardPasses += 1;
+  if (isGoalkeeperBackPass) team.stats.goalkeeperBackPasses += 1;
 
   state.ball = {
     mode: "LOOSE",
@@ -954,10 +1009,10 @@ function startShot(
   // et la vitesse initiales. Le but sera validé uniquement si la balle traverse
   // réellement la ligne entre les poteaux.
   const aimedY =
-    0.5 + state.rng.between(-0.065, 0.065);
+    0.5 + state.rng.between(-0.095, 0.095);
   const aimError =
-    0.018 +
-    (1 - execution) * (0.16 + distance * 0.22);
+    0.032 +
+    (1 - execution) * (0.22 + distance * 0.30);
   const targetY = aimedY + state.rng.between(-aimError, aimError);
   const beyondGoalX = goal.x + attackDirection(shooter.side) * 0.035;
   const direction = normalizeVector({
@@ -1185,9 +1240,9 @@ function tryPhysicalShotInterception(
           1,
         );
       const touchProbability = clamp(
-        0.28 + 0.55 * reachQuality + 0.25 * exactness - 0.16 * ballSpeed,
-        0.12,
-        0.98,
+        0.34 + 0.58 * reachQuality + 0.26 * exactness - 0.12 * ballSpeed,
+        0.16,
+        0.99,
       );
 
       if (state.rng.chance(touchProbability)) {
@@ -1432,6 +1487,17 @@ function registerPhysicalGoal(
     ? getPlayer(state, ball.lastTouchPlayerId)
     : undefined;
   const scorer = lastTouch?.teamIndex === scoringTeamIndex ? lastTouch : undefined;
+  if (
+    lastTouch &&
+    lastTouch.teamIndex !== scoringTeamIndex &&
+    ball.kind === "PASS" &&
+    ball.sourceTeamIndex === lastTouch.teamIndex
+  ) {
+    // On ne compte comme CSC que les vraies remises de sa propre équipe qui
+    // terminent dans le but. Une parade ou une déviation sur un tir adverse
+    // reste créditée au tireur, comme au football réel.
+    state.teams[lastTouch.teamIndex].stats.ownGoals += 1;
+  }
   const message = scorer
     ? `BUT ! ${scorer.card.shortName} marque pour ${scoringTeam.name}.`
     : `BUT ! ${scoringTeam.name} marque, avec une dernière déviation adverse.`;
@@ -1785,11 +1851,18 @@ function tryControlLooseBall(
         energy: player.energy,
         synergyBonus: player.synergyBonus,
       });
-      const controlRadius = lerp(
-        MATCH_CONFIG.ball.controlRadiusMin,
-        MATCH_CONFIG.ball.controlRadiusMax,
-        stats.technique / 100,
-      );
+      const isIntendedGoalkeeperBackPass =
+        player.assignedPosition === "GK" &&
+        player.runtimeId === looseBall.intendedReceiverId &&
+        player.teamIndex === looseBall.sourceTeamIndex &&
+        looseBall.kind === "PASS";
+      const controlRadius = isIntendedGoalkeeperBackPass
+        ? MATCH_CONFIG.ball.goalkeeperBackPassControlRadius
+        : lerp(
+            MATCH_CONFIG.ball.controlRadiusMin,
+            MATCH_CONFIG.ball.controlRadiusMax,
+            stats.technique / 100,
+          );
       return {
         player,
         stats,
@@ -1830,6 +1903,19 @@ function tryControlLooseBall(
 
     if (player.runtimeId === looseBall.intendedReceiverId) {
       controlProbability = clamp(controlProbability + 0.10, 0, 0.99);
+    }
+
+    if (
+      player.assignedPosition === "GK" &&
+      player.runtimeId === looseBall.intendedReceiverId &&
+      player.teamIndex === looseBall.sourceTeamIndex &&
+      looseBall.kind === "PASS"
+    ) {
+      // Contrôle au pied d'une passe volontaire : le gardien anticipe la
+      // remise et bénéficie d'un rayon d'approche supérieur. Il ne "capte"
+      // pas la balle avec les mains, mais il ne la regarde plus filer dans son
+      // propre but comme un tir adverse.
+      controlProbability = clamp(controlProbability + 0.24, 0, 0.995);
     }
 
     if (ballSpeed <= MATCH_CONFIG.ball.looseBallStopSpeed * 1.5) {
@@ -3482,6 +3568,9 @@ function withoutPossessionTicks(
     shotsOnTarget: stats.shotsOnTarget,
     passesAttempted: stats.passesAttempted,
     passesCompleted: stats.passesCompleted,
+    backwardPasses: stats.backwardPasses,
+    goalkeeperBackPasses: stats.goalkeeperBackPasses,
+    ownGoals: stats.ownGoals,
     dribbles: stats.dribbles,
     progressiveRuns: stats.progressiveRuns,
     duelsWon: stats.duelsWon,

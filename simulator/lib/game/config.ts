@@ -1,4 +1,4 @@
-export const ENGINE_VERSION = "0.5.0";
+export const ENGINE_VERSION = "0.6.0";
 
 export const MATCH_CONFIG = {
   displayedMinutes: 90,
@@ -83,6 +83,17 @@ export const MATCH_CONFIG = {
     transitionShotWindowSeconds: 4,
   },
 
+  passing: {
+    backwardPenalty: 0.72,
+    backwardPressureRelief: 0.50,
+    goalkeeperBasePenalty: 0.48,
+    goalkeeperPressureRelief: 0.54,
+    goalkeeperSafeLead: 0.045,
+    goalkeeperErrorMultiplier: 0.30,
+    goalkeeperPowerErrorMultiplier: 0.22,
+    goalkeeperSpeedMultiplier: 0.78,
+  },
+
   ball: {
     passDeceleration: 0.12,
     passMinSpeed: 0.11,
@@ -93,8 +104,9 @@ export const MATCH_CONFIG = {
     looseBallStopSpeed: 0.008,
     controlRadiusMin: 0.010,
     controlRadiusMax: 0.017,
-    goalkeeperCatchRadius: 0.020,
-    goalkeeperParryRadius: 0.034,
+    goalkeeperCatchRadius: 0.024,
+    goalkeeperParryRadius: 0.041,
+    goalkeeperBackPassControlRadius: 0.027,
     comfortableControlSpeed: 0.22,
     reboundDeceleration: 0.15,
     goalMouthMinY: 0.42,

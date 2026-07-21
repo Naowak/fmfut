@@ -99,7 +99,7 @@ export async function POST(request: Request) {
         "La baseline enregistre un échantillon spatial par seconde logique pour les heatmaps et les métriques de bloc.",
         "Les expériences de sensibilité utilisent exactement les mêmes seeds que la baseline.",
         "Le boost de +10 est appliqué à la stat testée sur le onze titulaire domicile uniquement.",
-        "La V0.5 mesure aussi touches, corners, six mètres, coups francs, penalties, arrêts gardien et temps additionnel moyen.",
+        "La V0.6 mesure aussi les passes arrière, les remises au gardien et les buts contre son camp pour surveiller la construction basse.",
         "Un but n'est plus tiré probabilistiquement : il faut que la balle traverse physiquement la ligne entre les poteaux.",
         "Les heatmaps sont exprimées dans le repère de chaque équipe : notre but en bas, but adverse en haut.",
         "Le moteur ne possède encore qu'une formation 4-3-3 : la comparaison de formations sera ajoutée quand plusieurs formations existeront.",
@@ -345,6 +345,12 @@ function aggregate(matches: MatchSummary[]): MonteCarloAggregate {
     awayShots: 0,
     homePasses: 0,
     awayPasses: 0,
+    homeBackwardPasses: 0,
+    awayBackwardPasses: 0,
+    homeGoalkeeperBackPasses: 0,
+    awayGoalkeeperBackPasses: 0,
+    homeOwnGoals: 0,
+    awayOwnGoals: 0,
     homePassesCompleted: 0,
     awayPassesCompleted: 0,
     homeDribbles: 0,
@@ -392,6 +398,12 @@ function aggregate(matches: MatchSummary[]): MonteCarloAggregate {
     totals.awayShots += match.away.shots;
     totals.homePasses += match.home.passesAttempted;
     totals.awayPasses += match.away.passesAttempted;
+    totals.homeBackwardPasses += match.home.backwardPasses;
+    totals.awayBackwardPasses += match.away.backwardPasses;
+    totals.homeGoalkeeperBackPasses += match.home.goalkeeperBackPasses;
+    totals.awayGoalkeeperBackPasses += match.away.goalkeeperBackPasses;
+    totals.homeOwnGoals += match.home.ownGoals;
+    totals.awayOwnGoals += match.away.ownGoals;
     totals.homePassesCompleted += match.home.passesCompleted;
     totals.awayPassesCompleted += match.away.passesCompleted;
     totals.homeDribbles += match.home.dribbles;
@@ -443,6 +455,12 @@ function aggregate(matches: MatchSummary[]): MonteCarloAggregate {
     averageAwayShots: average(totals.awayShots, count),
     averageHomePasses: average(totals.homePasses, count),
     averageAwayPasses: average(totals.awayPasses, count),
+    averageHomeBackwardPasses: average(totals.homeBackwardPasses, count),
+    averageAwayBackwardPasses: average(totals.awayBackwardPasses, count),
+    averageHomeGoalkeeperBackPasses: average(totals.homeGoalkeeperBackPasses, count),
+    averageAwayGoalkeeperBackPasses: average(totals.awayGoalkeeperBackPasses, count),
+    averageHomeOwnGoals: average(totals.homeOwnGoals, count),
+    averageAwayOwnGoals: average(totals.awayOwnGoals, count),
     averageHomeDribbles: average(totals.homeDribbles, count),
     averageAwayDribbles: average(totals.awayDribbles, count),
     averageHomeProgressiveRuns: average(totals.homeProgressiveRuns, count),

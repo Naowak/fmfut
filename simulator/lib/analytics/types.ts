@@ -26,6 +26,12 @@ export interface MonteCarloAggregate {
   averageAwayShots: number;
   averageHomePasses: number;
   averageAwayPasses: number;
+  averageHomeBackwardPasses: number;
+  averageAwayBackwardPasses: number;
+  averageHomeGoalkeeperBackPasses: number;
+  averageAwayGoalkeeperBackPasses: number;
+  averageHomeOwnGoals: number;
+  averageAwayOwnGoals: number;
   averageHomeDribbles: number;
   averageAwayDribbles: number;
   averageHomeProgressiveRuns: number;
