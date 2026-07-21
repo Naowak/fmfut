@@ -245,7 +245,7 @@ export function AnalyticsDashboard() {
             <section className="card analytics-section">
               <h2>Sensibilité des six statistiques</h2>
               <p className="muted">
-                Même série de seeds, avec +10 sur une seule stat du onze domicile. Le ± correspond à l'erreur standard du delta apparié : plus elle est proche du delta, plus le signal global est bruité.
+                Même série de seeds, avec +10 sur une seule stat du onze domicile. Le ± correspond à l'erreur standard du delta apparié. Un badge « bruité » signifie que l'intervalle approximatif à 95 % contient encore zéro : on ne retouche pas une stat sur ce seul signal global.
               </p>
               <div className="sensitivity-list">
                 {[...data.sensitivity]
@@ -388,10 +388,24 @@ function MetricRow({ label, home, away }: { label: string; home: string | number
 
 function SensitivityBar({ item, max }: { item: SensitivityResult; max: number }) {
   const width = (Math.abs(item.averageGoalDifferenceDelta) / max) * 100;
+  const signalToNoise =
+    item.goalDifferenceStdError > 0
+      ? Math.abs(item.averageGoalDifferenceDelta) / item.goalDifferenceStdError
+      : Number.POSITIVE_INFINITY;
+  const globallyConclusive = signalToNoise >= 1.96;
+
   return (
     <div className="sensitivity-row">
       <div className="sensitivity-label">
-        <strong>{item.stat}</strong>
+        <div className="sensitivity-title-row">
+          <strong>{item.stat}</strong>
+          <span
+            className="sensitivity-confidence"
+            data-conclusive={globallyConclusive}
+          >
+            {globallyConclusive ? "signal global net" : "signal global bruité"}
+          </span>
+        </div>
         <span>
           Δ buts {formatSigned(item.averageGoalDifferenceDelta)} ± {item.goalDifferenceStdError} · Δ win rate{" "}
           {formatSigned(item.homeWinRateDelta)} pts · {item.secondaryMetricLabel}{" "}

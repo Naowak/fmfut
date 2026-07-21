@@ -1,4 +1,4 @@
-export const ENGINE_VERSION = "0.7.0";
+export const ENGINE_VERSION = "0.8.0";
 
 export const MATCH_CONFIG = {
   displayedMinutes: 90,
@@ -23,7 +23,7 @@ export const MATCH_CONFIG = {
 
   fatigue: {
     minStatMultiplier: 0.82,
-    distanceEnergyCost: 3.1,
+    distanceEnergyCost: 2.7,
     pressingCostMultiplier: 1.10,
   },
 
@@ -36,8 +36,8 @@ export const MATCH_CONFIG = {
   },
 
   movement: {
-    minSpeedPerLogicalSecond: 0.0264,
-    maxSpeedPerLogicalSecond: 0.066,
+    minSpeedPerLogicalSecond: 0.03168,
+    maxSpeedPerLogicalSecond: 0.0792,
     controlledBallSpeedMultiplierMin: 0.80,
     controlledBallSpeedMultiplierMax: 0.96,
     shapeRepositionMultiplier: 1.32,
@@ -73,6 +73,7 @@ export const MATCH_CONFIG = {
   },
 
   duels: {
+    engagementRadius: 0.020,
     loserStunMinSeconds: 0.8,
     loserStunMaxSeconds: 1.8,
     stunnedSpeedMultiplier: 0.12,

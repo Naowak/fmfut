@@ -555,3 +555,17 @@ La V0.6 corrige la construction basse et le viewer :
 - Balance Lab : erreur standard sur la sensibilité globale et micro-benchmarks isolés des six statistiques.
 
 Voir `CHANGELOG_V0.7.md` pour le détail.
+
+
+## V0.8 — replay et stabilité
+
+La V0.8 ajoute :
+
+- navigation temporelle avant/arrière par pas de 1, 2, 5 et 10 secondes ;
+- commentaires cliquables pour seek directement vers un événement ;
+- vitesses d'affichage `×0.5`, `×1`, `×2`, `×4` ;
+- joueurs environ 20 % plus rapides que la V0.7 ;
+- changements automatiques uniquement lors des arrêts de jeu ;
+- rayon de duel réduit ;
+- correction du deadlock d'une balle libre immobilisée extrêmement près d'une ligne ;
+- badge de confiance dans le Balance Lab pour distinguer signal global et bruit Monte-Carlo.

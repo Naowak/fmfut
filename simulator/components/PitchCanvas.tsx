@@ -30,8 +30,9 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
   const [time, setTime] = useState(0);
   const [eventOverlay, setEventOverlay] = useState<MatchEvent | null>(null);
   const [playing, setPlaying] = useState(true);
-  // ×2 est le rythme normal du jeu. ×1 reste disponible pour inspecter une action.
-  const [speed, setSpeed] = useState<1 | 2 | 4>(2);
+  // Les multiplicateurs internes historiques sont remappés pour l'UI :
+  // facteur 1 = ×0.5 affiché, 2 = ×1, 4 = ×2, 8 = ×4.
+  const [speed, setSpeed] = useState<1 | 2 | 4 | 8>(2);
 
   const metadata = useMemo(
     () => new Map(replay.players.map((player) => [player.runtimeId, player])),
@@ -175,15 +176,29 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
 
   const clockLabel = snapshot ? formatMatchClock(snapshot) : "0:00";
 
-  function seekBy(seconds: number) {
-    setTime((previous) => {
-      const next = Math.min(replay.logicalDuration, previous + seconds);
-      if (next >= replay.logicalDuration) setPlaying(false);
-      return next;
-    });
+  function resetPlaybackEventState() {
     setEventOverlay(null);
     freezeUntilRef.current = 0;
     overlayUntilRef.current = 0;
+    // Après un seek manuel, les événements peuvent être rejoués si
+    // l'utilisateur repasse dessus.
+    handledPauseEventsRef.current.clear();
+  }
+
+  function seekTo(nextTime: number, pause = true) {
+    const next = Math.max(0, Math.min(replay.logicalDuration, nextTime));
+    setTime(next);
+
+    if (pause || next >= replay.logicalDuration) {
+      setPlaying(false);
+    }
+
+    resetPlaybackEventState();
+  }
+
+  function seekBy(seconds: number) {
+    // Un saut par bouton conserve l'état lecture/pause courant.
+    seekTo(time + seconds, false);
   }
 
   return (
@@ -273,34 +288,56 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
             </button>
 
             <div className="speed-buttons" aria-label="Vitesse de lecture">
-              {([1, 2, 4] as const).map((value) => (
+              {([
+                { value: 1 as const, label: "×0.5" },
+                { value: 2 as const, label: "×1" },
+                { value: 4 as const, label: "×2" },
+                { value: 8 as const, label: "×4" },
+              ]).map(({ value, label }) => (
                 <button
                   key={value}
                   type="button"
                   className="control-button"
                   data-active={speed === value}
                   onClick={() => setSpeed(value)}
-                  title={`Lecture ×${value}`}
+                  title={`Lecture ${label}`}
                 >
-                  ×{value}
+                  {label}
                 </button>
               ))}
             </div>
           </div>
 
-          <div className="seek-controls" aria-label="Avancer dans le replay">
-            <span className="seek-label">Avancer</span>
-            {[1, 2, 5, 10].map((seconds) => (
-              <button
-                key={seconds}
-                type="button"
-                className="control-button seek-button"
-                onClick={() => seekBy(seconds)}
-                disabled={time >= replay.logicalDuration}
-              >
-                +{seconds}s
-              </button>
-            ))}
+          <div className="seek-controls seek-controls-bidirectional" aria-label="Naviguer dans le replay">
+            <div className="seek-control-group">
+              <span className="seek-label">Reculer</span>
+              {[10, 5, 2, 1].map((seconds) => (
+                <button
+                  key={`back-${seconds}`}
+                  type="button"
+                  className="control-button seek-button"
+                  onClick={() => seekBy(-seconds)}
+                  disabled={time <= 0}
+                >
+                  -{seconds}s
+                </button>
+              ))}
+            </div>
+
+            <div className="seek-control-group">
+              <span className="seek-label">Avancer</span>
+              {[1, 2, 5, 10].map((seconds) => (
+                <button
+                  key={`forward-${seconds}`}
+                  type="button"
+                  className="control-button seek-button"
+                  onClick={() => seekBy(seconds)}
+                  disabled={time >= replay.logicalDuration}
+                >
+                  +{seconds}s
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="timeline-row">
@@ -311,11 +348,7 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
               step={0.1}
               value={time}
               onChange={(event) => {
-                setTime(Number(event.target.value));
-                setPlaying(false);
-                setEventOverlay(null);
-                freezeUntilRef.current = 0;
-                overlayUntilRef.current = 0;
+                seekTo(Number(event.target.value));
               }}
               aria-label="Position dans le replay"
             />
@@ -350,6 +383,7 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
               <EventLine
                 key={`${event.t}-${event.type}-${index}`}
                 event={event}
+                onSeek={() => seekTo(event.t)}
               />
             ))
           )}
@@ -403,13 +437,24 @@ function SubstitutionToast({
   );
 }
 
-function EventLine({ event }: { event: MatchEvent }) {
+function EventLine({
+  event,
+  onSeek,
+}: {
+  event: MatchEvent;
+  onSeek: () => void;
+}) {
   return (
-    <div className={`event-item event-item-${event.type.toLowerCase()}`}>
+    <button
+      type="button"
+      className={`event-item event-item-clickable event-item-${event.type.toLowerCase()}`}
+      onClick={onSeek}
+      title="Revenir à cet événement"
+    >
       <span className="event-type-icon" aria-hidden="true">{eventIcon(event)}</span>
       <span className="event-minute">{event.clockLabel ?? "—"}</span>
       <span>{event.message}</span>
-    </div>
+    </button>
   );
 }
 

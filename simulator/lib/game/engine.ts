@@ -58,6 +58,7 @@ type RuntimeTeam = {
   players: RuntimePlayer[];
   substitutionsUsed: number;
   lastSubstitutionDisplayedMinute: number;
+  pendingSubstitutions: Array<{ outgoingRuntimeId: string; reason: string }>;
   score: number;
   stats: Omit<TeamMatchStats, "possession" | "averageStarterEnergy"> & {
     possessionTicks: number;
@@ -345,6 +346,7 @@ export function simulateMatch(params: {
         state.addedTimeAnnounced = false;
         state.halftimeEmitted = true;
         state.nextDecisionAt = state.t;
+        processPendingSubstitutions(state);
         resetForKickoff(state, away.index);
         emit(state, {
           type: "KICKOFF",
@@ -554,6 +556,7 @@ function createRuntimeTeam(
     players,
     substitutionsUsed: 0,
     lastSubstitutionDisplayedMinute: -999,
+    pendingSubstitutions: [],
     score: 0,
     stats: EMPTY_STATS(),
   };
@@ -1538,7 +1541,10 @@ function attemptDefensiveDuel(
   );
 
   const defender = nearestPlayerToPoint(owner.pos, opponents);
-  if (!defender || distanceBetween(owner.pos, defender.pos) > 0.035) {
+  if (
+    !defender ||
+    distanceBetween(owner.pos, defender.pos) > MATCH_CONFIG.duels.engagementRadius
+  ) {
     return false;
   }
 
@@ -1599,7 +1605,11 @@ function attemptDefensiveDuel(
       ),
     };
 
-    setControlledBall(state, defender);
+    // Le ballon reste au point de contact réel du duel. Dans les versions
+    // précédentes il sautait au centre du défenseur, ce qui amplifiait
+    // visuellement la sensation de tacle "à distance".
+    const contactPos = { ...state.ball.pos };
+    setControlledBall(state, defender, contactPos);
     emit(state, {
       type: "TACKLE",
       team: defender.side,
@@ -1762,7 +1772,7 @@ function maybeInjuryFromContact(
     unavailableMatches: 1,
   });
 
-  substitutePlayer(state, victim, "blessure");
+  queueSubstitution(state, victim, "blessure");
 
   // Petit risque de blessure secondaire sur un choc violent.
   if (
@@ -1772,7 +1782,7 @@ function maybeInjuryFromContact(
     state.rng.chance(probability * 0.12)
   ) {
     other.injured = true;
-    substitutePlayer(state, other, "blessure");
+    queueSubstitution(state, other, "blessure");
   }
 }
 
@@ -1981,8 +1991,11 @@ function predictLooseBallStop(ball: LooseBall): Vec2 {
   const direction = normalizeVector(velocity);
 
   return {
-    x: clamp(ball.pos.x + direction.x * stopDistance, 0.02, 0.98),
-    y: clamp(ball.pos.y + direction.y * stopDistance, 0.03, 0.97),
+    // Une balle encore dans le terrain doit rester atteignable jusque très
+    // près des lignes. Les anciennes marges pouvaient créer une balle
+    // immobile à y≈0.996 tandis que les joueurs restaient bloqués à 0.975.
+    x: clamp(ball.pos.x + direction.x * stopDistance, 0.005, 0.995),
+    y: clamp(ball.pos.y + direction.y * stopDistance, 0.005, 0.995),
   };
 }
 
@@ -2339,7 +2352,7 @@ function setDribbleTarget(
 
 function updateMovement(state: MatchState, dt: number): void {
   for (const player of state.allPlayers) {
-    if (!player.active || !player.assignedPosition) {
+    if (!player.active || !player.assignedPosition || player.injured) {
       continue;
     }
 
@@ -2423,6 +2436,15 @@ function updateMovement(state: MatchState, dt: number): void {
 }
 
 function evaluateAutomaticSubstitutions(state: MatchState): void {
+  // Les changements tactiques et rotations planifiées ne sont appliqués
+  // que pendant un arrêt de jeu. Une blessure survenue balle en jeu est
+  // mise en attente jusqu'au prochain restart.
+  if (!state.restart) {
+    return;
+  }
+
+  processPendingSubstitutions(state);
+
   const displayedMinute =
     (state.t / state.logicalDuration) * MATCH_CONFIG.displayedMinutes;
 
@@ -2481,6 +2503,47 @@ function evaluateAutomaticSubstitutions(state: MatchState): void {
         : "rotation";
 
     substitutePlayer(state, candidate, reason);
+  }
+}
+
+function queueSubstitution(
+  state: MatchState,
+  outgoing: RuntimePlayer,
+  reason: string,
+): void {
+  const team = state.teams[outgoing.teamIndex];
+  if (
+    team.pendingSubstitutions.some(
+      (pending) => pending.outgoingRuntimeId === outgoing.runtimeId,
+    )
+  ) {
+    return;
+  }
+
+  team.pendingSubstitutions.push({
+    outgoingRuntimeId: outgoing.runtimeId,
+    reason,
+  });
+}
+
+function processPendingSubstitutions(state: MatchState): void {
+  for (const team of state.teams) {
+    const pending = [...team.pendingSubstitutions];
+    team.pendingSubstitutions = [];
+
+    for (const item of pending) {
+      const outgoing = getPlayer(state, item.outgoingRuntimeId);
+      if (!outgoing || !outgoing.active || outgoing.redCard) {
+        continue;
+      }
+
+      const changed = substitutePlayer(state, outgoing, item.reason);
+      if (!changed && outgoing.injured) {
+        // Aucun remplaçant compatible/disponible : le joueur blessé quitte
+        // néanmoins le terrain à l'arrêt de jeu.
+        outgoing.active = false;
+      }
+    }
   }
 }
 
@@ -3542,8 +3605,8 @@ function moveTowards(
 
   const ratio = maxDistance / distance;
   return {
-    x: clamp(current.x + dx * ratio, 0.015, 0.985),
-    y: clamp(current.y + dy * ratio, 0.025, 0.975),
+    x: clamp(current.x + dx * ratio, 0.005, 0.995),
+    y: clamp(current.y + dy * ratio, 0.005, 0.995),
   };
 }
 
