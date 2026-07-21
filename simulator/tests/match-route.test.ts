@@ -10,6 +10,22 @@ function post(body: string): Request {
 }
 
 describe("POST /api/matches/simulate", () => {
+  it("simulates from the complete SQLite player source", async () => {
+    const response = await POST(
+      post(JSON.stringify({ seed: "sqlite-route", logicalSeconds: 60 })),
+    );
+    const payload = (await response.json()) as {
+      contractVersion: string;
+      result: { homeName: string; awayName: string };
+    };
+    expect(response.status).toBe(200);
+    expect(payload.contractVersion).toBe("1.0.0");
+    expect(payload.result).toMatchObject({
+      homeName: "Paris AI",
+      awayName: "World XI",
+    });
+  });
+
   it("returns 400 for malformed JSON", async () => {
     const response = await POST(post("{"));
     expect(response.status).toBe(400);

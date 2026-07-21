@@ -37,6 +37,42 @@ function expectFiniteTree(value: unknown): void {
 }
 
 describe("match engine public contract", () => {
+  it("preserves the V0.9 characterization match", () => {
+    const output = simulateMatch({
+      home: DEFAULT_HOME_SELECTION,
+      away: DEFAULT_AWAY_SELECTION,
+      players,
+      seed: "audit-v09",
+      logicalSeconds: 360,
+      recordReplay: true,
+    });
+
+    expect(output.result).toEqual({
+      homeScore: 3,
+      awayScore: 3,
+      homeName: "Paris AI",
+      awayName: "World XI",
+    });
+    expect(output.replay.frames).toHaveLength(1863);
+    expect(output.replay.events).toHaveLength(318);
+    expect(output.stats.home).toMatchObject({
+      shots: 12,
+      shotsOnTarget: 10,
+      passesAttempted: 60,
+      passesCompleted: 43,
+      substitutions: 3,
+      possession: 53.7,
+    });
+    expect(output.stats.away).toMatchObject({
+      shots: 10,
+      shotsOnTarget: 8,
+      passesAttempted: 54,
+      passesCompleted: 36,
+      substitutions: 3,
+      possession: 46.3,
+    });
+  });
+
   it("reproduces exactly the same output with the same seed", () => {
     expect(simulate("determinism-1")).toEqual(simulate("determinism-1"));
   });
@@ -65,6 +101,24 @@ describe("match engine public contract", () => {
         expect(player.y).toBeLessThanOrEqual(1);
       }
     }
+  });
+
+  it("records deterministic spatial analytics through the extracted module", () => {
+    const input = {
+      home: DEFAULT_HOME_SELECTION,
+      away: DEFAULT_AWAY_SELECTION,
+      players,
+      seed: "spatial-extraction",
+      logicalSeconds: 60,
+      recordReplay: false,
+      recordSpatialAnalytics: true,
+    } as const;
+    const first = simulateMatch(input).analytics;
+    const second = simulateMatch(input).analytics;
+    expect(first).toEqual(second);
+    expect(first?.home.samples).toBeGreaterThan(0);
+    expect(first?.home.allPlayersHeatmap).toHaveLength(96);
+    expect(first?.away.allPlayersHeatmap).toHaveLength(96);
   });
 
   it("keeps score, goal events and substitution limits coherent", () => {

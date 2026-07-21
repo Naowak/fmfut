@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { loadPlayersFromCsv } from "@/lib/data/load-players";
+import { loadPlayers } from "@/lib/data/load-players";
 import {
   ANALYZED_STATS,
   type AnalyzedStat,
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     const seedPrefix = body.seedPrefix?.trim() || "mc";
     const includeSensitivity = body.sensitivity ?? true;
 
-    const players = loadPlayersFromCsv();
+    const players = loadPlayers();
     assertSelectionPlayersExist(DEFAULT_HOME_SELECTION, players);
     assertSelectionPlayersExist(DEFAULT_AWAY_SELECTION, players);
 

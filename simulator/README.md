@@ -39,6 +39,7 @@ statut `400` accompagné d'une liste d'erreurs structurée.
 - Next.js 16.2
 - React 19.2
 - TypeScript
+- Node.js 22.13 minimum (`node:sqlite`)
 - App Router
 - Route Handler `POST /api/matches/simulate`
 - Canvas 2D natif
@@ -69,15 +70,21 @@ Puis ouvrir :
 http://localhost:3000
 ```
 
-## Utiliser ton CSV de 18 405 joueurs
+## Source de joueurs
 
-Remplace simplement :
+Par défaut, le serveur utilise la base complète `../dataset/players.db`, soit
+18 405 joueurs. Le chemin peut être remplacé par :
 
-```text
-data/players.csv
+```bash
+PLAYERS_DB_PATH=/chemin/absolu/players.db npm run dev
 ```
 
-par ton export complet.
+Si la base SQLite n'est pas disponible, le serveur utilise explicitement le
+petit CSV de démonstration `data/players.csv`.
+
+### Forcer une source CSV
+
+`PLAYERS_CSV_PATH` reste disponible comme override prioritaire :
 
 Le format attendu est exactement :
 
@@ -98,10 +105,24 @@ technique
 intelligence
 ```
 
-Alternative : garder le CSV ailleurs et définir :
-
 ```bash
 PLAYERS_CSV_PATH=/chemin/absolu/players_normalized.csv npm run dev
+```
+
+## API joueurs
+
+`GET /api/players` expose une recherche SQLite paginée. Filtres disponibles :
+
+- `query`
+- `position`
+- `nation`
+- `minOverall` / `maxOverall`
+- `page` / `pageSize` (100 maximum)
+
+Exemple :
+
+```text
+/api/players?query=Mbapp%C3%A9&position=ST&page=1&pageSize=20
 ```
 
 ## Simulation côté serveur
@@ -300,6 +321,17 @@ Le moteur complet.
 Aucune dépendance React ou Canvas.
 
 C'est cette fonction qui devra devenir le coeur stable du jeu.
+
+Les types runtime, primitives géométriques et analytics spatiales sont
+désormais isolés dans `runtime.ts`, `geometry.ts` et
+`spatial-analytics.ts`. La gestion des remplacements et le recalcul de
+synergie vivent dans `substitutions.ts`. Les consommateurs utilisent
+uniquement `index.ts`.
+
+### `lib/data/player-repository.ts`
+
+Repository SQLite en lecture seule : chargement canonique complet, recherche,
+filtres et pagination.
 
 ### `lib/game/config.ts`
 

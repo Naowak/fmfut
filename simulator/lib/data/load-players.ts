@@ -2,6 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { parse } from "csv-parse/sync";
 import type { PlayerCard, Position } from "@/lib/game/types";
+import {
+  getPlayerRepository,
+  playersDatabaseExists,
+} from "./player-repository";
 
 type CsvPlayer = {
   player_id: string;
@@ -37,6 +41,30 @@ const VALID_POSITIONS = new Set<Position>([
 
 let cachedPlayers: PlayerCard[] | null = null;
 let cachedPath: string | null = null;
+let cachedDatabasePlayers: PlayerCard[] | null = null;
+let warnedDemoFallback = false;
+
+export function loadPlayers(): PlayerCard[] {
+  if (process.env.PLAYERS_CSV_PATH) {
+    return loadPlayersFromCsv(process.env.PLAYERS_CSV_PATH);
+  }
+  if (playersDatabaseExists()) {
+    cachedDatabasePlayers ??= getPlayerRepository().all();
+    return cachedDatabasePlayers;
+  }
+  if (!warnedDemoFallback) {
+    console.warn(
+      "Base SQLite absente : utilisation explicite du CSV de démonstration.",
+    );
+    warnedDemoFallback = true;
+  }
+  return loadPlayersFromCsv();
+}
+
+export function playerDataSource(): "sqlite" | "csv-override" | "demo-csv" {
+  if (process.env.PLAYERS_CSV_PATH) return "csv-override";
+  return playersDatabaseExists() ? "sqlite" : "demo-csv";
+}
 
 function asPosition(value: string): Position {
   const normalized = value.trim().toUpperCase() as Position;

@@ -349,6 +349,9 @@ def build_database(
     print(f"Nationalités        : {nations:,}")
     print(f"Base créée          : {db_path.resolve()}")
 
+    # Le mode WAL accélère l'import, mais une base distribuée en lecture seule
+    # doit rester autonome et ne pas tenter de créer des fichiers -wal/-shm.
+    conn.execute("PRAGMA journal_mode = DELETE")
     conn.close()
 
 

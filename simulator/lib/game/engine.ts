@@ -9,187 +9,53 @@ import {
   opponentGoal,
   ownGoal,
 } from "./formations";
+import {
+  distanceBetween,
+  lerp,
+  lineYAtX,
+  moveTowards,
+  normalizeVector,
+  pointToSegmentDistance,
+  rotateVector,
+  vectorLength,
+} from "./geometry";
 import { SeededRng } from "./rng";
+import {
+  createEmptyStats,
+  type LooseBall,
+  type MatchState,
+  type RestartState,
+  type RestartType,
+  type RuntimePlayer,
+  type RuntimeTeam,
+  type TeamIndex,
+} from "./runtime";
+import {
+  captureSpatialSample,
+  createSpatialAccumulator,
+  finalizeSpatialAnalytics,
+} from "./spatial-analytics";
+import {
+  evaluateAutomaticSubstitutions,
+  processPendingSubstitutions,
+  queueSubstitution,
+  recomputeSynergy,
+  type SubstitutionHooks,
+} from "./substitutions";
 import type {
   MatchEvent,
   MatchReplay,
   MatchSimulationOutput,
   MatchSimulationInput,
-  MatchSpatialAnalytics,
   PlayerCard,
   Position,
   ReplayFrame,
   ReplayPlayerMeta,
-  Role,
   TeamMatchStats,
   TeamSelection,
-  TeamSpatialAnalytics,
   TeamSide,
   Vec2,
 } from "./types";
-
-type TeamIndex = 0 | 1;
-
-type RuntimePlayer = {
-  runtimeId: string;
-  card: PlayerCard;
-  teamIndex: TeamIndex;
-  side: TeamSide;
-  shirtNumber: number;
-  active: boolean;
-  injured: boolean;
-  redCard: boolean;
-  yellowCards: number;
-  energy: number;
-  pos: Vec2;
-  target: Vec2;
-  slotId: string | null;
-  assignedPosition: Position | null;
-  role: Role;
-  synergyBonus: number;
-  stunnedUntil: number;
-  runTarget: Vec2 | null;
-  runUntil: number;
-};
-
-type RuntimeTeam = {
-  index: TeamIndex;
-  side: TeamSide;
-  name: string;
-  selection: TeamSelection;
-  players: RuntimePlayer[];
-  substitutionsUsed: number;
-  lastSubstitutionDisplayedMinute: number;
-  pendingSubstitutions: Array<{ outgoingRuntimeId: string; reason: string }>;
-  score: number;
-  stats: Omit<TeamMatchStats, "possession" | "averageStarterEnergy"> & {
-    possessionTicks: number;
-  };
-};
-
-type ControlledBall = {
-  mode: "CONTROLLED";
-  ownerId: string;
-  pos: Vec2;
-  controlOffset?: Vec2;
-  controlAt?: number;
-};
-
-type TransitBall = {
-  mode: "TRANSIT";
-  kind: "PASS" | "SHOT";
-  actorId: string;
-  from: Vec2;
-  to: Vec2;
-  pos: Vec2;
-  elapsed: number;
-  duration: number;
-  intendedReceiverId?: string;
-  passSuccess?: boolean;
-  interceptId?: string;
-  shotResult?: "GOAL" | "SAVE_CATCH" | "SAVE_REBOUND" | "MISS";
-  goalkeeperId?: string;
-  reboundTo?: Vec2;
-};
-
-type LooseBall = {
-  mode: "LOOSE";
-  pos: Vec2;
-  age: number;
-  velocity: Vec2;
-  deceleration: number;
-  sourceTeamIndex?: TeamIndex;
-  actorId?: string;
-  intendedReceiverId?: string;
-  kind?: "PASS" | "SHOT" | "REBOUND" | "DEFLECTION" | "SET_PIECE";
-  lastTouchTeamIndex?: TeamIndex;
-  lastTouchPlayerId?: string;
-  setPieceOrigin?: RestartType;
-};
-
-type DeadBall = {
-  mode: "DEAD";
-  pos: Vec2;
-};
-
-type RuntimeBall = ControlledBall | TransitBall | LooseBall | DeadBall;
-
-type RestartType =
-  | "KICKOFF"
-  | "THROW_IN"
-  | "CORNER"
-  | "GOAL_KICK"
-  | "FREE_KICK"
-  | "PENALTY";
-
-type RestartState = {
-  type: RestartType;
-  teamIndex: TeamIndex;
-  spot: Vec2;
-  takerId: string;
-  resumeAt: number;
-  directShotPreferred: boolean;
-  wallPlayerIds: string[];
-  countsForAddedTime: boolean;
-};
-
-type SpatialTeamAccumulator = {
-  samples: number;
-  allPlayersHeatmap: number[];
-  positionHeatmaps: Partial<Record<Position, number[]>>;
-  blockCenterProgressSum: number;
-  blockCenterProgressSquaredSum: number;
-  blockCenterMin: number;
-  blockCenterMax: number;
-  blockDepthSum: number;
-  blockWidthSum: number;
-  playersInAttackingHalfSum: number;
-  defensiveLineProgressSum: number;
-  possessionSamples: number;
-  outOfPossessionSamples: number;
-  possessionBlockCenterSum: number;
-  outOfPossessionBlockCenterSum: number;
-  possessionWidthSum: number;
-  outOfPossessionWidthSum: number;
-};
-
-type SpatialAccumulator = {
-  columns: number;
-  rows: number;
-  teams: [SpatialTeamAccumulator, SpatialTeamAccumulator];
-};
-
-type MatchState = {
-  t: number;
-  logicalDuration: number;
-  regulationLogicalDuration: number;
-  period: 1 | 2;
-  periodElapsed: number;
-  periodRegulationDuration: number;
-  periodAddedTarget: number;
-  firstHalfAddedLogical: number;
-  secondHalfAddedLogical: number;
-  addedTimeAnnounced: boolean;
-  matchEnded: boolean;
-  restart: RestartState | null;
-  teams: [RuntimeTeam, RuntimeTeam];
-  allPlayers: RuntimePlayer[];
-  ball: RuntimeBall;
-  events: MatchEvent[];
-  frames: ReplayFrame[];
-  nextDecisionAt: number;
-  nextReplayAt: number;
-  nextSpatialAt: number;
-  halftimeEmitted: boolean;
-  rng: SeededRng;
-  controlStartedAt: number;
-  recordReplay: boolean;
-  recordSpatialAnalytics: boolean;
-  spatial: SpatialAccumulator;
-  possessionTeamIndex: TeamIndex;
-  possessionChangedAt: number;
-  notifications: MatchSimulationOutput["notifications"];
-};
 
 type ActionCandidate =
   | { kind: "PASS"; targetId: string; utility: number }
@@ -197,34 +63,12 @@ type ActionCandidate =
   | { kind: "DRIBBLE"; utility: number }
   | { kind: "HOLD"; utility: number };
 
-const EMPTY_STATS = () => ({
-  shots: 0,
-  shotsOnTarget: 0,
-  passesAttempted: 0,
-  passesCompleted: 0,
-  backwardPasses: 0,
-  goalkeeperBackPasses: 0,
-  ownGoals: 0,
-  dribbles: 0,
-  progressiveRuns: 0,
-  duelsWon: 0,
-  transitionShots: 0,
-  possessionRegains: 0,
-  tackles: 0,
-  fouls: 0,
-  yellowCards: 0,
-  redCards: 0,
-  offsides: 0,
-  substitutions: 0,
-  throwIns: 0,
-  corners: 0,
-  goalKicks: 0,
-  freeKicks: 0,
-  penalties: 0,
-  goalkeeperSaves: 0,
-  goalsFromSetPieces: 0,
-  possessionTicks: 0,
-});
+const SUBSTITUTION_HOOKS: SubstitutionHooks = {
+  getPlayer,
+  setControlledBall,
+  emit,
+};
+
 
 export function simulateMatch(
   params: MatchSimulationInput,
@@ -344,7 +188,7 @@ export function simulateMatch(
         state.addedTimeAnnounced = false;
         state.halftimeEmitted = true;
         state.nextDecisionAt = state.t;
-        processPendingSubstitutions(state);
+        processPendingSubstitutions(state, SUBSTITUTION_HOOKS);
         resetForKickoff(state, away.index);
         emit(state, {
           type: "KICKOFF",
@@ -375,13 +219,17 @@ export function simulateMatch(
       updateBall(state, dt);
     }
     updatePossessionCounter(state);
-    evaluateAutomaticSubstitutions(state);
+    evaluateAutomaticSubstitutions(state, SUBSTITUTION_HOOKS);
 
     if (
       state.recordSpatialAnalytics &&
       state.t + 1e-9 >= state.nextSpatialAt
     ) {
-      captureSpatialSample(state);
+      captureSpatialSample(
+        state.spatial,
+        state.teams,
+        state.possessionTeamIndex,
+      );
       state.nextSpatialAt += MATCH_CONFIG.spatialSampleInterval;
     }
 
@@ -557,7 +405,7 @@ function createRuntimeTeam(
     lastSubstitutionDisplayedMinute: -999,
     pendingSubstitutions: [],
     score: 0,
-    stats: EMPTY_STATS(),
+    stats: createEmptyStats(),
   };
 }
 
@@ -2595,238 +2443,6 @@ function updateMovement(state: MatchState, dt: number): void {
   }
 }
 
-function evaluateAutomaticSubstitutions(state: MatchState): void {
-  // Les changements tactiques et rotations planifiées ne sont appliqués
-  // que pendant un arrêt de jeu. Une blessure survenue balle en jeu est
-  // mise en attente jusqu'au prochain restart.
-  if (!state.restart) {
-    return;
-  }
-
-  processPendingSubstitutions(state);
-
-  const displayedMinute =
-    (state.t / state.logicalDuration) * MATCH_CONFIG.displayedMinutes;
-
-  if (displayedMinute < MATCH_CONFIG.substitutions.minimumDisplayedMinute) {
-    return;
-  }
-
-  for (const team of state.teams) {
-    if (team.substitutionsUsed >= MATCH_CONFIG.maxSubstitutions) {
-      continue;
-    }
-
-    if (
-      displayedMinute - team.lastSubstitutionDisplayedMinute <
-      MATCH_CONFIG.substitutions.cooldownDisplayedMinutes
-    ) {
-      continue;
-    }
-
-    const plannedTarget = MATCH_CONFIG.substitutions.plannedWindows.filter(
-      (minute) => displayedMinute >= minute,
-    ).length;
-    const plannedRotationDue = team.substitutionsUsed < plannedTarget;
-
-    const candidates = team.players
-      .filter(
-        (player) =>
-          player.active &&
-          !player.injured &&
-          !player.redCard &&
-          player.assignedPosition !== "GK",
-      )
-      .sort((a, b) => substitutionPriority(b) - substitutionPriority(a));
-
-    const candidate = candidates[0];
-    if (!candidate) {
-      continue;
-    }
-
-    const emergencyFatigue =
-      candidate.energy < MATCH_CONFIG.substitutions.emergencyEnergyThreshold;
-    const usefulPlannedRotation =
-      plannedRotationDue &&
-      (candidate.energy < MATCH_CONFIG.substitutions.plannedEnergyThreshold ||
-        candidate.yellowCards > 0 ||
-        displayedMinute >= 78);
-
-    if (!emergencyFatigue && !usefulPlannedRotation) {
-      continue;
-    }
-
-    const reason = candidate.yellowCards > 0
-      ? "carton"
-      : emergencyFatigue
-        ? "fatigue"
-        : "rotation";
-
-    substitutePlayer(state, candidate, reason);
-  }
-}
-
-function queueSubstitution(
-  state: MatchState,
-  outgoing: RuntimePlayer,
-  reason: string,
-): void {
-  const team = state.teams[outgoing.teamIndex];
-  if (
-    team.pendingSubstitutions.some(
-      (pending) => pending.outgoingRuntimeId === outgoing.runtimeId,
-    )
-  ) {
-    return;
-  }
-
-  team.pendingSubstitutions.push({
-    outgoingRuntimeId: outgoing.runtimeId,
-    reason,
-  });
-}
-
-function processPendingSubstitutions(state: MatchState): void {
-  for (const team of state.teams) {
-    const pending = [...team.pendingSubstitutions];
-    team.pendingSubstitutions = [];
-
-    for (const item of pending) {
-      const outgoing = getPlayer(state, item.outgoingRuntimeId);
-      if (!outgoing || !outgoing.active || outgoing.redCard) {
-        continue;
-      }
-
-      const changed = substitutePlayer(state, outgoing, item.reason);
-      if (!changed && outgoing.injured) {
-        // Aucun remplaçant compatible/disponible : le joueur blessé quitte
-        // néanmoins le terrain à l'arrêt de jeu.
-        outgoing.active = false;
-      }
-    }
-  }
-}
-
-function substitutionPriority(player: RuntimePlayer): number {
-  const fatigueScore = 100 - player.energy;
-  const yellowScore = player.yellowCards > 0 ? 18 : 0;
-  const roleScore = player.role === "PRESSING" ? 5 : 0;
-  return fatigueScore + yellowScore + roleScore;
-}
-
-function substitutePlayer(
-  state: MatchState,
-  outgoing: RuntimePlayer,
-  reason: string,
-): boolean {
-  const team = state.teams[outgoing.teamIndex];
-
-  if (
-    team.substitutionsUsed >= MATCH_CONFIG.maxSubstitutions ||
-    !outgoing.assignedPosition ||
-    !outgoing.slotId
-  ) {
-    if (outgoing.injured) {
-      outgoing.active = false;
-    }
-    return false;
-  }
-
-  const outgoingIsGoalkeeper = outgoing.assignedPosition === "GK";
-  const bench = team.players
-    .filter(
-      (player) =>
-        !player.active &&
-        !player.injured &&
-        !player.redCard &&
-        player.slotId === null &&
-        (outgoingIsGoalkeeper
-          ? player.card.primaryPosition === "GK"
-          : player.card.primaryPosition !== "GK"),
-    )
-    .sort(
-      (a, b) =>
-        positionCompatibility(b.card, outgoing.assignedPosition!) -
-        positionCompatibility(a.card, outgoing.assignedPosition!),
-    );
-
-  const incoming = bench[0];
-  if (!incoming) {
-    if (outgoing.injured) {
-      outgoing.active = false;
-    }
-    return false;
-  }
-
-  const inheritedSlot = outgoing.slotId;
-  const inheritedPosition = outgoing.assignedPosition;
-  const inheritedRole = outgoing.role;
-  const inheritedPositionOnPitch = { ...outgoing.pos };
-
-  outgoing.active = false;
-  incoming.active = true;
-  incoming.slotId = inheritedSlot;
-  incoming.assignedPosition = inheritedPosition;
-  incoming.role = inheritedRole;
-  incoming.pos = inheritedPositionOnPitch;
-  incoming.target = inheritedPositionOnPitch;
-  incoming.energy = 100;
-
-  team.substitutionsUsed += 1;
-  team.stats.substitutions += 1;
-  team.lastSubstitutionDisplayedMinute =
-    (state.t / state.logicalDuration) * MATCH_CONFIG.displayedMinutes;
-  recomputeSynergy(team);
-
-  if (
-    state.ball.mode === "CONTROLLED" &&
-    state.ball.ownerId === outgoing.runtimeId
-  ) {
-    setControlledBall(state, incoming);
-  }
-
-  emit(state, {
-    type: "SUBSTITUTION",
-    team: team.side,
-    playerId: incoming.card.playerId,
-    runtimeId: incoming.runtimeId,
-    message: `${incoming.card.shortName} remplace ${outgoing.card.shortName} (${reason}).`,
-  });
-
-  return true;
-}
-
-function recomputeSynergy(team: RuntimeTeam): void {
-  const bySlot = new Map(
-    team.players
-      .filter((player) => player.active && player.slotId)
-      .map((player) => [player.slotId!, player]),
-  );
-
-  for (const player of team.players) {
-    if (!player.active || !player.slotId) {
-      player.synergyBonus = 0;
-      continue;
-    }
-
-    const slot = getSlot(player.slotId);
-    const matchingNeighbors = slot.neighbors
-      .map((neighborId) => bySlot.get(neighborId))
-      .filter(
-        (neighbor): neighbor is RuntimePlayer =>
-          Boolean(neighbor) &&
-          neighbor!.card.nationalityName ===
-            player.card.nationalityName,
-      ).length;
-
-    player.synergyBonus = Math.min(
-      MATCH_CONFIG.synergy.maxIntelligenceBonus,
-      matchingNeighbors *
-        MATCH_CONFIG.synergy.intelligencePerMatchingNeighbor,
-    );
-  }
-}
-
 
 type ScheduleRestartParams = {
   type: RestartType;
@@ -3260,13 +2876,6 @@ function penaltySpotForAttack(attackingSide: TeamSide): Vec2 {
   };
 }
 
-function lineYAtX(from: Vec2, to: Vec2, x: number): number {
-  const dx = to.x - from.x;
-  if (Math.abs(dx) < 1e-9) return to.y;
-  const t = (x - from.x) / dx;
-  return from.y + (to.y - from.y) * t;
-}
-
 function logicalExtraToDisplayedMinutes(
   state: MatchState,
   logicalSeconds: number,
@@ -3423,32 +3032,6 @@ function spaceAheadScore(
   return clamp(nearestDistance(ahead, opponents) / 0.16);
 }
 
-function pointToSegmentDistance(
-  point: Vec2,
-  start: Vec2,
-  end: Vec2,
-): number {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const lengthSquared = dx * dx + dy * dy;
-
-  if (lengthSquared === 0) {
-    return distanceBetween(point, start);
-  }
-
-  const t = clamp(
-    ((point.x - start.x) * dx + (point.y - start.y) * dy) /
-      lengthSquared,
-  );
-
-  const projection = {
-    x: start.x + t * dx,
-    y: start.y + t * dy,
-  };
-
-  return distanceBetween(point, projection);
-}
-
 function nearestDistance(
   point: Vec2,
   players: RuntimePlayer[],
@@ -3568,204 +3151,6 @@ function adjustRunTargetForOffside(
   };
 }
 
-function createSpatialAccumulator(): SpatialAccumulator {
-  return {
-    columns: MATCH_CONFIG.analytics.heatmapColumns,
-    rows: MATCH_CONFIG.analytics.heatmapRows,
-    teams: [createSpatialTeamAccumulator(), createSpatialTeamAccumulator()],
-  };
-}
-
-function createSpatialTeamAccumulator(): SpatialTeamAccumulator {
-  const cells =
-    MATCH_CONFIG.analytics.heatmapColumns *
-    MATCH_CONFIG.analytics.heatmapRows;
-  const positions: Position[] = [
-    "GK",
-    "LB",
-    "CB",
-    "RB",
-    "CDM",
-    "CM",
-    "CAM",
-    "LM",
-    "RM",
-    "LW",
-    "RW",
-    "ST",
-  ];
-
-  return {
-    samples: 0,
-    allPlayersHeatmap: Array(cells).fill(0),
-    positionHeatmaps: Object.fromEntries(
-      positions.map((position) => [position, Array(cells).fill(0)]),
-    ) as Partial<Record<Position, number[]>>,
-    blockCenterProgressSum: 0,
-    blockCenterProgressSquaredSum: 0,
-    blockCenterMin: 1,
-    blockCenterMax: 0,
-    blockDepthSum: 0,
-    blockWidthSum: 0,
-    playersInAttackingHalfSum: 0,
-    defensiveLineProgressSum: 0,
-    possessionSamples: 0,
-    outOfPossessionSamples: 0,
-    possessionBlockCenterSum: 0,
-    outOfPossessionBlockCenterSum: 0,
-    possessionWidthSum: 0,
-    outOfPossessionWidthSum: 0,
-  };
-}
-
-function captureSpatialSample(state: MatchState): void {
-  const { columns, rows } = state.spatial;
-
-  for (const team of state.teams) {
-    const accumulator = state.spatial.teams[team.index];
-    const active = team.players.filter(
-      (player) => player.active && player.assignedPosition,
-    );
-    const outfield = active.filter(
-      (player) => player.assignedPosition !== "GK",
-    );
-
-    accumulator.samples += 1;
-
-    for (const player of active) {
-      const progress = clamp(toTeamProgress(player.pos.x, team.side));
-      const lateral = clamp(player.pos.y);
-      const column = Math.min(
-        columns - 1,
-        Math.floor(lateral * columns),
-      );
-      const row = Math.min(rows - 1, Math.floor(progress * rows));
-      const index = row * columns + column;
-      accumulator.allPlayersHeatmap[index] += 1;
-      accumulator.positionHeatmaps[player.assignedPosition!]?.splice(
-        index,
-        1,
-        (accumulator.positionHeatmaps[player.assignedPosition!]![index] ?? 0) + 1,
-      );
-    }
-
-    if (outfield.length === 0) {
-      continue;
-    }
-
-    const progresses = outfield.map((player) =>
-      toTeamProgress(player.pos.x, team.side),
-    );
-    const laterals = outfield.map((player) => player.pos.y);
-    const blockCenter =
-      progresses.reduce((sum, value) => sum + value, 0) /
-      progresses.length;
-    const blockWidth = Math.max(...laterals) - Math.min(...laterals);
-    accumulator.blockCenterProgressSum += blockCenter;
-    accumulator.blockCenterProgressSquaredSum += blockCenter * blockCenter;
-    accumulator.blockCenterMin = Math.min(accumulator.blockCenterMin, blockCenter);
-    accumulator.blockCenterMax = Math.max(accumulator.blockCenterMax, blockCenter);
-    accumulator.blockDepthSum +=
-      Math.max(...progresses) - Math.min(...progresses);
-    accumulator.blockWidthSum += blockWidth;
-
-    if (state.possessionTeamIndex === team.index) {
-      accumulator.possessionSamples += 1;
-      accumulator.possessionBlockCenterSum += blockCenter;
-      accumulator.possessionWidthSum += blockWidth;
-    } else {
-      accumulator.outOfPossessionSamples += 1;
-      accumulator.outOfPossessionBlockCenterSum += blockCenter;
-      accumulator.outOfPossessionWidthSum += blockWidth;
-    }
-    accumulator.playersInAttackingHalfSum += progresses.filter(
-      (value) => value > 0.5,
-    ).length;
-
-    const defensiveLine = outfield.filter((player) =>
-      ["LB", "CB", "RB"].includes(player.assignedPosition!),
-    );
-    if (defensiveLine.length > 0) {
-      accumulator.defensiveLineProgressSum +=
-        defensiveLine.reduce(
-          (sum, player) =>
-            sum + toTeamProgress(player.pos.x, team.side),
-          0,
-        ) / defensiveLine.length;
-    }
-  }
-}
-
-function finalizeSpatialAnalytics(
-  spatial: SpatialAccumulator,
-): MatchSpatialAnalytics {
-  return {
-    columns: spatial.columns,
-    rows: spatial.rows,
-    home: finalizeSpatialTeam(spatial.teams[0]),
-    away: finalizeSpatialTeam(spatial.teams[1]),
-  };
-}
-
-function finalizeSpatialTeam(
-  accumulator: SpatialTeamAccumulator,
-): TeamSpatialAnalytics {
-  const divisor = Math.max(accumulator.samples, 1);
-  return {
-    samples: accumulator.samples,
-    allPlayersHeatmap: accumulator.allPlayersHeatmap,
-    positionHeatmaps: accumulator.positionHeatmaps,
-    averageBlockCenterProgress: round(
-      accumulator.blockCenterProgressSum / divisor,
-      3,
-    ),
-    averageBlockDepth: round(accumulator.blockDepthSum / divisor, 3),
-    averageBlockWidth: round(accumulator.blockWidthSum / divisor, 3),
-    averagePlayersInAttackingHalf: round(
-      accumulator.playersInAttackingHalfSum / divisor,
-      2,
-    ),
-    averageDefensiveLineProgress: round(
-      accumulator.defensiveLineProgressSum / divisor,
-      3,
-    ),
-    averageBlockCenterInPossession: round(
-      accumulator.possessionBlockCenterSum /
-        Math.max(accumulator.possessionSamples, 1),
-      3,
-    ),
-    averageBlockCenterOutOfPossession: round(
-      accumulator.outOfPossessionBlockCenterSum /
-        Math.max(accumulator.outOfPossessionSamples, 1),
-      3,
-    ),
-    averageWidthInPossession: round(
-      accumulator.possessionWidthSum /
-        Math.max(accumulator.possessionSamples, 1),
-      3,
-    ),
-    averageWidthOutOfPossession: round(
-      accumulator.outOfPossessionWidthSum /
-        Math.max(accumulator.outOfPossessionSamples, 1),
-      3,
-    ),
-    blockCenterRange: round(
-      Math.max(0, accumulator.blockCenterMax - accumulator.blockCenterMin),
-      3,
-    ),
-    blockCenterStdDev: round(
-      Math.sqrt(
-        Math.max(
-          0,
-          accumulator.blockCenterProgressSquaredSum / divisor -
-            (accumulator.blockCenterProgressSum / divisor) ** 2,
-        ),
-      ),
-      3,
-    ),
-  };
-}
-
 function findActiveBySlot(
   team: RuntimeTeam,
   slotId: string,
@@ -3801,58 +3186,6 @@ function otherTeamIndex(index: TeamIndex): TeamIndex {
 
 function otherSide(side: TeamSide): TeamSide {
   return side === "HOME" ? "AWAY" : "HOME";
-}
-
-function distanceBetween(a: Vec2, b: Vec2): number {
-  return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
-function moveTowards(
-  current: Vec2,
-  target: Vec2,
-  maxDistance: number,
-): Vec2 {
-  const dx = target.x - current.x;
-  const dy = target.y - current.y;
-  const distance = Math.hypot(dx, dy);
-
-  if (distance === 0 || distance <= maxDistance) {
-    return { ...target };
-  }
-
-  const ratio = maxDistance / distance;
-  return {
-    x: clamp(current.x + dx * ratio, 0.005, 0.995),
-    y: clamp(current.y + dy * ratio, 0.005, 0.995),
-  };
-}
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-
-function vectorLength(vector: Vec2): number {
-  return Math.hypot(vector.x, vector.y);
-}
-
-function normalizeVector(vector: Vec2): Vec2 {
-  const length = vectorLength(vector);
-  if (length <= 1e-9) {
-    return { x: 0, y: 0 };
-  }
-  return {
-    x: vector.x / length,
-    y: vector.y / length,
-  };
-}
-
-function rotateVector(vector: Vec2, angle: number): Vec2 {
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  return {
-    x: vector.x * cos - vector.y * sin,
-    y: vector.x * sin + vector.y * cos,
-  };
 }
 
 function averageStarterEnergy(team: RuntimeTeam): number {

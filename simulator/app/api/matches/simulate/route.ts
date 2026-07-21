@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
-import { loadPlayersFromCsv } from "@/lib/data/load-players";
+import { loadPlayers } from "@/lib/data/load-players";
 import {
   parseMatchSimulationRequest,
   simulateMatch,
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
         throw new SyntaxError("Corps JSON invalide.");
       }),
     );
-    const players = loadPlayersFromCsv();
+    const players = loadPlayers();
 
     const home = body.home ?? DEFAULT_HOME_SELECTION;
     const away = body.away ?? DEFAULT_AWAY_SELECTION;

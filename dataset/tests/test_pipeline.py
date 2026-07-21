@@ -100,10 +100,12 @@ class PipelineTests(unittest.TestCase):
             positions = connection.execute(
                 "SELECT position FROM player_positions WHERE player_id = 42 ORDER BY priority"
             ).fetchall()
+            journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
             connection.close()
 
             self.assertEqual(player, (82, "CM"))
             self.assertEqual(positions, [("CM",), ("CAM",)])
+            self.assertEqual(journal_mode, "delete")
 
 
 if __name__ == "__main__":

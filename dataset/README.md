@@ -190,7 +190,9 @@ build_players_db.py
     ↓
 players.db
     ↓
-API / moteur de match
+repository SQLite en lecture seule
+    ↓
+API joueurs / moteur de match
 ```
 
 Le CSV devient donc une source d'import, pas une dépendance runtime.
