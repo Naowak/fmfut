@@ -1,4 +1,4 @@
-# FUT Manager — Next.js 2D Match Simulator V0.7
+# FUT Manager — Next.js 2D Match Simulator V0.9
 
 Prototype de moteur de match pour le projet FUT Manager.
 
@@ -569,3 +569,13 @@ La V0.8 ajoute :
 - rayon de duel réduit ;
 - correction du deadlock d'une balle libre immobilisée extrêmement près d'une ligne ;
 - badge de confiance dans le Balance Lab pour distinguer signal global et bruit Monte-Carlo.
+
+
+## V0.9 — règles spatiales et sorties visibles
+
+- sorties de balle visibles avant déclaration du corner, de la touche ou du six mètres ;
+- scène conservée pendant l'arrêt, puis repositionnement juste avant la remise ;
+- anti-enfermement des ailiers près du drapeau de corner ;
+- coups d'envoi conformes : chaque équipe dans sa moitié et adversaires hors du rond central ;
+- gardiens plus conservateurs et sorties conditionnées à un avantage réel sur les défenseurs ;
+- léger resserrement de l'impact global d'Intelligence et Technique.

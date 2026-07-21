@@ -1,4 +1,4 @@
-export const ENGINE_VERSION = "0.8.0";
+export const ENGINE_VERSION = "0.9.0";
 
 export const MATCH_CONFIG = {
   displayedMinutes: 90,
@@ -11,9 +11,12 @@ export const MATCH_CONFIG = {
   maxSubstitutions: 5,
 
   decision: {
-    temperatureMin: 0.10,
-    temperatureMax: 0.36,
-    temperatureGamma: 1.15,
+    // Plage légèrement resserrée : l'Intelligence reste la statistique de
+    // décision, sans produire un écart de performance global excessif entre
+    // les joueurs déjà très bien notés.
+    temperatureMin: 0.12,
+    temperatureMax: 0.34,
+    temperatureGamma: 1.08,
   },
 
   synergy: {
@@ -36,8 +39,8 @@ export const MATCH_CONFIG = {
   },
 
   movement: {
-    minSpeedPerLogicalSecond: 0.03168,
-    maxSpeedPerLogicalSecond: 0.0792,
+    minSpeedPerLogicalSecond: 0.03,
+    maxSpeedPerLogicalSecond: 0.07,
     controlledBallSpeedMultiplierMin: 0.80,
     controlledBallSpeedMultiplierMax: 0.96,
     shapeRepositionMultiplier: 1.32,
@@ -64,6 +67,23 @@ export const MATCH_CONFIG = {
     minDepth: 0.10,
     maxDepth: 0.24,
     baseChancePerDecision: 0.06,
+  },
+
+  wingPlay: {
+    cornerProgressThreshold: 0.86,
+    sidelineThreshold: 0.105,
+    inwardEscapeDistance: 0.13,
+    cornerDribblePenalty: 0.34,
+    centralPassBonus: 0.24,
+  },
+
+  goalkeeper: {
+    baseProgress: 0.042,
+    possessionProgress: 0.070,
+    lateralFollow: 0.18,
+    maxLateralOffset: 0.085,
+    looseBallMaxProgress: 0.19,
+    requiredDistanceAdvantage: 0.025,
   },
 
   offsides: {

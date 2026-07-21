@@ -813,10 +813,10 @@ function eventDisplayTime(event: MatchEvent, logicalDuration: number): number {
       // Les arrêts de jeu ordinaires sont annoncés au milieu du
       // repositionnement, pas avant que l'action précédente soit visible.
       case "PENALTY": return 1.55;
-      case "CORNER": return 1.05;
+      case "CORNER": return 0.32;
       case "FREE_KICK": return 1.10;
-      case "THROW_IN": return 0.62;
-      case "GOAL_KICK": return 0.85;
+      case "THROW_IN": return 0.26;
+      case "GOAL_KICK": return 0.30;
       case "OFFSIDE": return 0.80;
       default: return 0.08;
     }
