@@ -11,7 +11,9 @@ export async function GET(request: Request) {
     const searchParams = Object.fromEntries(new URL(request.url).searchParams);
     const filters = playerSearchSchema.parse(searchParams);
     return NextResponse.json(getPlayerRepository().search(filters), {
-      headers: { "Cache-Control": "no-store" },
+      headers: {
+        "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
+      },
     });
   } catch (error) {
     if (error instanceof ZodError) {

@@ -13,9 +13,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:dataset": "cd .. && python3 -m unittest discover -s dataset/tests -p 'test_*.py'",
-    "test:all": "npm run typecheck && npm test && npm run test:dataset"
+    "test:all": "npm run typecheck && npm test && npm run test:dataset",
+    "benchmark:data": "node --import tsx scripts/benchmark-data.ts",
+    "package:data": "node --import tsx scripts/package-data.ts",
+    "test:data-package": "node --import tsx scripts/test-data-package.ts"
   },
   "dependencies": {
+    "better-sqlite3": "13.0.1",
     "csv-parse": "7.0.1",
     "next": "16.2.10",
     "react": "19.2.7",
@@ -26,6 +30,7 @@
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "tsx": "^4.23.1",
     "typescript": "^5.9.0",
     "vitest": "^4.1.10"
   },

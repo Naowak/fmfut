@@ -39,7 +39,8 @@ statut `400` accompagné d'une liste d'erreurs structurée.
 - Next.js 16.2
 - React 19.2
 - TypeScript
-- Node.js 22.13 minimum (`node:sqlite`)
+- Node.js 22 minimum
+- `better-sqlite3` comme driver de production
 - App Router
 - Route Handler `POST /api/matches/simulate`
 - Canvas 2D natif
@@ -77,6 +78,13 @@ Par défaut, le serveur utilise la base complète `../dataset/players.db`, soit
 
 ```bash
 PLAYERS_DB_PATH=/chemin/absolu/players.db npm run dev
+```
+
+Le repository utilise `better-sqlite3` par défaut. Le driver expérimental natif
+reste disponible comme solution de repli explicite :
+
+```bash
+SQLITE_DRIVER=node:sqlite npm run dev
 ```
 
 Si la base SQLite n'est pas disponible, le serveur utilise explicitement le
@@ -123,6 +131,35 @@ Exemple :
 
 ```text
 /api/players?query=Mbapp%C3%A9&position=ST&page=1&pageSize=20
+```
+
+La recherche par nom utilise FTS5 avec suppression des diacritiques : `Mbappe`
+retrouve donc `Mbappé`. Les résultats sont conservés dans un cache LRU borné
+pendant 60 secondes. `GET /api/players/metadata` expose l'empreinte de la
+source, la version du schéma et le statut de licence.
+
+### Packaging de la base
+
+Une release produit une copie autonome et un manifeste contenant les volumes,
+les métadonnées et le SHA-256 de la base :
+
+```bash
+npm run package:data -- --output ./dist/data
+```
+
+La commande échoue tant que la licence n'est pas déclarée et documentée comme
+`verified-redistributable`. Pour valider uniquement le mécanisme en local sur
+le dataset actuel :
+
+```bash
+npm run package:data -- --output ./dist/data --allow-unverified
+npm run test:data-package
+```
+
+Benchmark local du repository :
+
+```bash
+npm run benchmark:data
 ```
 
 ## Simulation côté serveur
@@ -328,10 +365,22 @@ désormais isolés dans `runtime.ts`, `geometry.ts` et
 synergie vivent dans `substitutions.ts`. Les consommateurs utilisent
 uniquement `index.ts`.
 
+La seconde passe de découpage isole aussi les primitives dans
+`ball-physics.ts`, la détection/classification des sorties dans
+`pitch-rules.ts` et les fonctions pures de reprises dans
+`restart-helpers.ts`.
+
+La troisième passe extrait le contrôleur de reprises dans `restarts.ts`, les
+collisions gardien/défenseurs sur tir dans `shot-interceptions.ts`, ainsi que
+les fautes, cartons et blessures de contact dans `discipline.ts`. `engine.ts`
+reste l'orchestrateur déterministe.
+
 ### `lib/data/player-repository.ts`
 
 Repository SQLite en lecture seule : chargement canonique complet, recherche,
-filtres et pagination.
+filtres, FTS5, cache et pagination. L'accès au driver est isolé derrière
+`sqlite-adapter.ts`. Le driver stable `better-sqlite3` est le défaut ;
+`node:sqlite` reste un fallback sélectionnable pour comparer ou diagnostiquer.
 
 ### `lib/game/config.ts`
 

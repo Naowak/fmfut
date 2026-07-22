@@ -1,7 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import type { PlayerCard, Position } from "@/lib/game/types";
+import { LruCache, type CacheStats } from "./lru-cache";
+import {
+  createSqliteAdapter,
+  type SqliteAdapter,
+} from "./sqlite-adapter";
 
 export interface PlayerSearchParams {
   query?: string;
@@ -24,6 +28,7 @@ export interface PlayerSearchResult {
 export interface PlayerRepository {
   all(): PlayerCard[];
   search(params: PlayerSearchParams): PlayerSearchResult;
+  metadata(): Record<string, string>;
   close(): void;
 }
 
@@ -62,31 +67,50 @@ const PLAYER_COLUMNS = `
 `;
 
 export class SqlitePlayerRepository implements PlayerRepository {
-  private readonly database: DatabaseSync;
+  private readonly database: SqliteAdapter;
+  private readonly searchCache = new LruCache<string, PlayerSearchResult>(
+    250,
+    60_000,
+  );
+  private allPlayers: PlayerCard[] | null = null;
 
-  constructor(public readonly databasePath: string) {
-    this.database = new DatabaseSync(databasePath, { readOnly: true });
+  constructor(
+    public readonly databasePath: string,
+    database?: SqliteAdapter,
+  ) {
+    this.database = database ?? createSqliteAdapter(databasePath);
+  }
+
+  get driverName(): string {
+    return this.database.driverName;
   }
 
   all(): PlayerCard[] {
+    if (this.allPlayers) return this.allPlayers;
     const rows = this.database
       .prepare(
         `SELECT ${PLAYER_COLUMNS}
          FROM players
          ORDER BY overall DESC, short_name ASC`,
       )
-      .all() as PlayerRow[];
-    return rows.map(toPlayerCard);
+      .all() as unknown as PlayerRow[];
+    this.allPlayers = rows.map(toPlayerCard);
+    return this.allPlayers;
   }
 
   search(params: PlayerSearchParams): PlayerSearchResult {
+    const cacheKey = JSON.stringify(params);
+    const cached = this.searchCache.get(cacheKey);
+    if (cached) return cached;
+
     const conditions: string[] = [];
     const values: Array<string | number> = [];
 
     if (params.query) {
-      conditions.push("(short_name LIKE ? OR long_name LIKE ?)");
-      const pattern = `%${params.query.trim()}%`;
-      values.push(pattern, pattern);
+      conditions.push(
+        "player_id IN (SELECT rowid FROM players_fts WHERE players_fts MATCH ?)",
+      );
+      values.push(toFtsQuery(params.query));
     }
     if (params.position) {
       conditions.push(`EXISTS (
@@ -113,7 +137,7 @@ export class SqlitePlayerRepository implements PlayerRepository {
       : "";
     const countRow = this.database
       .prepare(`SELECT COUNT(*) AS total FROM players ${where}`)
-      .get(...values) as { total: number };
+      .get(...values) as unknown as { total: number };
     const offset = (params.page - 1) * params.pageSize;
     const rows = this.database
       .prepare(
@@ -123,15 +147,32 @@ export class SqlitePlayerRepository implements PlayerRepository {
          ORDER BY overall DESC, short_name ASC
          LIMIT ? OFFSET ?`,
       )
-      .all(...values, params.pageSize, offset) as PlayerRow[];
+      .all(...values, params.pageSize, offset) as unknown as PlayerRow[];
 
-    return {
+    const result = {
       items: rows.map(toPlayerCard),
       page: params.page,
       pageSize: params.pageSize,
       total: countRow.total,
       totalPages: Math.ceil(countRow.total / params.pageSize),
     };
+    this.searchCache.set(cacheKey, result);
+    return result;
+  }
+
+  metadata(): Record<string, string> {
+    const rows = this.database
+      .prepare("SELECT key, value FROM dataset_metadata ORDER BY key")
+      .all() as Array<{ key: string; value: string }>;
+    return Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  }
+
+  cacheStats(): CacheStats {
+    return this.searchCache.stats();
+  }
+
+  clearCache(): void {
+    this.searchCache.clear();
   }
 
   close(): void {
@@ -207,4 +248,13 @@ function parsePositions(raw: string): Position[] {
   return value.filter((position): position is Position =>
     typeof position === "string",
   );
+}
+
+function toFtsQuery(value: string): string {
+  return value
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => `"${token.replaceAll('"', '""')}"*`)
+    .join(" AND ");
 }

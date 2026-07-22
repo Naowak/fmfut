@@ -34,6 +34,10 @@ Aucune dépendance externe.
 python dataset/build_players_db.py chemin/vers/players.csv dataset/players.db --replace
 ```
 
+Le statut de licence reste `unverified` par défaut. Les options de provenance
+et de licence sont documentées dans `SOURCE_AND_LICENSE.md`; ne pas utiliser le
+statut `verified-redistributable` sans vérification réelle des droits.
+
 Si le CSV contient plusieurs versions FIFA :
 
 ```bash
@@ -151,6 +155,15 @@ FROM players p
 JOIN player_positions pp ON pp.player_id = p.player_id
 WHERE pp.position = 'ST';
 ```
+
+### `players_fts`
+
+Index FTS5 des noms et nationalités, avec normalisation des diacritiques.
+
+### `dataset_metadata`
+
+Version de schéma, nom et SHA-256 de la source, volumes et statut de licence.
+Voir `SOURCE_AND_LICENSE.md` avant toute utilisation publique.
 
 ## Philosophie des stats
 

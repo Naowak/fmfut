@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import sqlite3
 import sys
@@ -270,6 +271,10 @@ def build_database(
     min_overall: int | None,
     limit: int | None,
     replace: bool,
+    source_url: str | None = None,
+    license_status: str = "unverified",
+    license_name: str | None = None,
+    license_url: str | None = None,
 ) -> None:
     if replace and db_path.exists():
         db_path.unlink()
@@ -336,10 +341,37 @@ def build_database(
 
     conn.commit()
 
+    # Garantit la cohérence de l'index plein texte, y compris lors d'une
+    # migration depuis une base créée avant l'ajout de FTS5.
+    conn.execute("INSERT INTO players_fts(players_fts) VALUES('rebuild')")
+
     final_count = conn.execute("SELECT COUNT(*) FROM players").fetchone()[0]
     nations = conn.execute(
         "SELECT COUNT(DISTINCT nationality_name) FROM players"
     ).fetchone()[0]
+
+    metadata = {
+        "schema_version": "2",
+        "source_filename": csv_path.name,
+        "source_sha256": file_sha256(csv_path),
+        "player_count": str(final_count),
+        "nationality_count": str(nations),
+        "license_status": license_status,
+    }
+    if source_url:
+        metadata["source_url"] = source_url
+    if license_name:
+        metadata["license_name"] = license_name
+    if license_url:
+        metadata["license_url"] = license_url
+    conn.executemany(
+        """
+        INSERT INTO dataset_metadata(key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
+        metadata.items(),
+    )
+    conn.commit()
 
     print(f"CSV lu             : {processed:,} lignes")
     print(f"Lignes candidates  : {inserted_or_seen:,}")
@@ -353,6 +385,14 @@ def build_database(
     # doit rester autonome et ne pas tenter de créer des fichiers -wal/-shm.
     conn.execute("PRAGMA journal_mode = DELETE")
     conn.close()
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def parse_args() -> argparse.Namespace:
@@ -383,6 +423,27 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Supprimer la base existante avant reconstruction.",
     )
+    parser.add_argument(
+        "--source-url",
+        default=None,
+        help="URL canonique de la source du CSV.",
+    )
+    parser.add_argument(
+        "--license-status",
+        choices=("unverified", "restricted", "verified-redistributable"),
+        default="unverified",
+        help="Statut juridique explicite du dataset.",
+    )
+    parser.add_argument(
+        "--license-name",
+        default=None,
+        help="Nom de la licence vérifiée.",
+    )
+    parser.add_argument(
+        "--license-url",
+        default=None,
+        help="URL de la notice de licence vérifiée.",
+    )
     return parser.parse_args()
 
 
@@ -399,4 +460,8 @@ if __name__ == "__main__":
         min_overall=args.min_overall,
         limit=args.limit,
         replace=args.replace,
+        source_url=args.source_url,
+        license_status=args.license_status,
+        license_name=args.license_name,
+        license_url=args.license_url,
     )

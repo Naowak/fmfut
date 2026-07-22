@@ -61,3 +61,34 @@ CREATE INDEX IF NOT EXISTS idx_players_overall
 
 CREATE INDEX IF NOT EXISTS idx_player_positions_position
     ON player_positions(position);
+
+CREATE TABLE IF NOT EXISTS dataset_metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS players_fts USING fts5(
+    short_name,
+    long_name,
+    nationality_name,
+    content='players',
+    content_rowid='player_id',
+    tokenize='unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER IF NOT EXISTS players_fts_insert AFTER INSERT ON players BEGIN
+    INSERT INTO players_fts(rowid, short_name, long_name, nationality_name)
+    VALUES (new.player_id, new.short_name, new.long_name, new.nationality_name);
+END;
+
+CREATE TRIGGER IF NOT EXISTS players_fts_delete AFTER DELETE ON players BEGIN
+    INSERT INTO players_fts(players_fts, rowid, short_name, long_name, nationality_name)
+    VALUES ('delete', old.player_id, old.short_name, old.long_name, old.nationality_name);
+END;
+
+CREATE TRIGGER IF NOT EXISTS players_fts_update AFTER UPDATE ON players BEGIN
+    INSERT INTO players_fts(players_fts, rowid, short_name, long_name, nationality_name)
+    VALUES ('delete', old.player_id, old.short_name, old.long_name, old.nationality_name);
+    INSERT INTO players_fts(rowid, short_name, long_name, nationality_name)
+    VALUES (new.player_id, new.short_name, new.long_name, new.nationality_name);
+END;

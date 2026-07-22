@@ -101,11 +101,50 @@ class PipelineTests(unittest.TestCase):
                 "SELECT position FROM player_positions WHERE player_id = 42 ORDER BY priority"
             ).fetchall()
             journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+            fts_count = connection.execute(
+                "SELECT COUNT(*) FROM players_fts WHERE players_fts MATCH 'Test*'"
+            ).fetchone()[0]
+            metadata = dict(
+                connection.execute("SELECT key, value FROM dataset_metadata")
+            )
             connection.close()
 
             self.assertEqual(player, (82, "CM"))
             self.assertEqual(positions, [("CM",), ("CAM",)])
             self.assertEqual(journal_mode, "delete")
+            self.assertEqual(fts_count, 1)
+            self.assertEqual(metadata["schema_version"], "2")
+            self.assertEqual(metadata["license_status"], "unverified")
+
+    def test_verified_license_metadata_is_recorded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            csv_path = root / "players.csv"
+            db_path = root / "players.db"
+            with csv_path.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=SOURCE_COLUMNS)
+                writer.writeheader()
+                writer.writerow(source_row())
+
+            build_database(
+                csv_path,
+                db_path,
+                None,
+                None,
+                None,
+                True,
+                source_url="https://example.test/source",
+                license_status="verified-redistributable",
+                license_name="Example License",
+                license_url="https://example.test/license",
+            )
+            connection = sqlite3.connect(db_path)
+            metadata = dict(
+                connection.execute("SELECT key, value FROM dataset_metadata")
+            )
+            connection.close()
+            self.assertEqual(metadata["license_status"], "verified-redistributable")
+            self.assertEqual(metadata["license_name"], "Example License")
 
 
 if __name__ == "__main__":

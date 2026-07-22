@@ -17,7 +17,7 @@ describe("SQLite player repository", () => {
 
   it("searches by name and preserves the six stats", () => {
     const result = repository.search({
-      query: "Mbappé",
+      query: "Mbappe",
       page: 1,
       pageSize: 20,
     });
@@ -60,5 +60,18 @@ describe("SQLite player repository", () => {
     expect(first.items.map((player) => player.playerId)).not.toEqual(
       second.items.map((player) => player.playerId),
     );
+  });
+
+  it("caches repeated searches and exposes provenance metadata", () => {
+    repository.clearCache();
+    const search = { query: "Salah", page: 1, pageSize: 10 };
+    repository.search(search);
+    repository.search(search);
+    expect(repository.cacheStats()).toMatchObject({ hits: 1, misses: 1 });
+    expect(repository.metadata()).toMatchObject({
+      schema_version: "2",
+      player_count: "18405",
+      license_status: "unverified",
+    });
   });
 });

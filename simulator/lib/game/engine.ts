@@ -1,4 +1,9 @@
 import { effectiveStats, positionCompatibility } from "./compatibility";
+import {
+  advanceBallPosition,
+  decayBallVelocity,
+  predictLooseBallStop,
+} from "./ball-physics";
 import { assertTeamSelection, MATCH_CONTRACT_VERSION } from "./contract";
 import { clamp, ENGINE_VERSION, MATCH_CONFIG, round } from "./config";
 import {
@@ -20,6 +25,26 @@ import {
   vectorLength,
 } from "./geometry";
 import { SeededRng } from "./rng";
+import {
+  handleFoul,
+  maybeInjuryFromContact,
+  type DisciplineHooks,
+} from "./discipline";
+import {
+  classifyBoundaryCrossing,
+  detectPitchBoundaryCrossing,
+  type BoundaryCrossing,
+} from "./pitch-rules";
+import {
+  executeRestart as executeRestartController,
+  scheduleRestart as scheduleRestartController,
+  type RestartHooks,
+  type ScheduleRestartParams,
+} from "./restarts";
+import {
+  tryPhysicalShotInterception,
+  type ShotInterceptionHooks,
+} from "./shot-interceptions";
 import {
   createEmptyStats,
   type LooseBall,
@@ -67,6 +92,28 @@ const SUBSTITUTION_HOOKS: SubstitutionHooks = {
   getPlayer,
   setControlledBall,
   emit,
+};
+
+const SHOT_INTERCEPTION_HOOKS: ShotInterceptionHooks = {
+  getPlayer,
+  setControlledBall,
+  emit,
+};
+
+const DISCIPLINE_HOOKS: DisciplineHooks = {
+  emit,
+  scheduleRestart,
+};
+
+const RESTART_HOOKS: RestartHooks = {
+  getPlayer,
+  setControlledBall,
+  startShot,
+  startPass,
+  positionPlayersForRestart,
+  captureFrame,
+  emit,
+  emitAt,
 };
 
 
@@ -1017,15 +1064,19 @@ function updateBall(state: MatchState, dt: number): void {
     const currentSpeed = vectorLength(ball.velocity);
 
     if (currentSpeed > 0) {
-      ball.pos = {
-        x: ball.pos.x + ball.velocity.x * step,
-        y: ball.pos.y + ball.velocity.y * step,
-      };
+      ball.pos = advanceBallPosition(ball.pos, ball.velocity, step);
     }
     ball.age += step;
 
     if (ball.kind === "SHOT") {
-      if (tryPhysicalShotInterception(state, previousPos, ball.pos)) {
+      if (
+        tryPhysicalShotInterception(
+          state,
+          previousPos,
+          ball.pos,
+          SHOT_INTERCEPTION_HOOKS,
+        )
+      ) {
         if (state.ball.mode !== "LOOSE") return;
       }
     }
@@ -1052,22 +1103,11 @@ function updateBall(state: MatchState, dt: number): void {
       return;
     }
 
-    const speedBeforeDecay = vectorLength(state.ball.velocity);
-    if (speedBeforeDecay > 0) {
-      const nextSpeed = Math.max(
-        0,
-        speedBeforeDecay - state.ball.deceleration * step,
-      );
-      if (nextSpeed <= MATCH_CONFIG.ball.looseBallStopSpeed) {
-        state.ball.velocity = { x: 0, y: 0 };
-      } else {
-        const direction = normalizeVector(state.ball.velocity);
-        state.ball.velocity = {
-          x: direction.x * nextSpeed,
-          y: direction.y * nextSpeed,
-        };
-      }
-    }
+    state.ball.velocity = decayBallVelocity(
+      state.ball.velocity,
+      state.ball.deceleration,
+      step,
+    );
 
     // Pas de collision "balayée" qui attribuerait la balle à distance : avec
     // les sous-pas physiques, un joueur ne contrôle que si la balle se trouve
@@ -1082,212 +1122,6 @@ function updateBall(state: MatchState, dt: number): void {
   }
 }
 
-function tryPhysicalShotInterception(
-  state: MatchState,
-  segmentStart: Vec2,
-  segmentEnd: Vec2,
-): boolean {
-  if (state.ball.mode !== "LOOSE" || state.ball.kind !== "SHOT") {
-    return false;
-  }
-
-  const shot = state.ball;
-  const shooter = shot.actorId ? getPlayer(state, shot.actorId) : undefined;
-  const defendingTeamIndex = shooter
-    ? otherTeamIndex(shooter.teamIndex)
-    : shot.lastTouchTeamIndex !== undefined
-      ? otherTeamIndex(shot.lastTouchTeamIndex)
-      : otherTeamIndex(state.possessionTeamIndex);
-  const defendingTeam = state.teams[defendingTeamIndex];
-  const goalkeeper = findActiveBySlot(defendingTeam, "GK");
-  const ballSpeed = vectorLength(shot.velocity);
-
-  if (goalkeeper?.active && goalkeeper.assignedPosition) {
-    const distance = pointToSegmentDistance(
-      goalkeeper.pos,
-      segmentStart,
-      segmentEnd,
-    );
-    if (distance <= MATCH_CONFIG.ball.goalkeeperParryRadius) {
-      const stats = effectiveStats({
-        player: goalkeeper.card,
-        assignedPosition: goalkeeper.assignedPosition,
-        energy: goalkeeper.energy,
-        synergyBonus: goalkeeper.synergyBonus,
-      });
-      const reachQuality = clamp(
-        (0.40 * stats.technique +
-          0.28 * stats.intelligence +
-          0.18 * stats.speed +
-          0.14 * stats.physical) /
-          100,
-      );
-      const exactness =
-        1 -
-        clamp(
-          distance / MATCH_CONFIG.ball.goalkeeperParryRadius,
-          0,
-          1,
-        );
-      const touchProbability = clamp(
-        0.34 + 0.58 * reachQuality + 0.26 * exactness - 0.12 * ballSpeed,
-        0.16,
-        0.99,
-      );
-
-      if (state.rng.chance(touchProbability)) {
-        defendingTeam.stats.goalkeeperSaves += 1;
-        if (shot.sourceTeamIndex !== undefined) {
-          state.teams[shot.sourceTeamIndex].stats.shotsOnTarget += 1;
-        }
-        defendingTeam.stats.duelsWon += 1;
-        const catchProbability = clamp(
-          0.12 +
-            0.52 * reachQuality +
-            0.22 * exactness -
-            0.42 * clamp(ballSpeed / MATCH_CONFIG.ball.shotMaxSpeed),
-          0.04,
-          0.78,
-        );
-
-        if (
-          distance <= MATCH_CONFIG.ball.goalkeeperCatchRadius &&
-          state.rng.chance(catchProbability)
-        ) {
-          goalkeeper.pos = moveTowards(
-            goalkeeper.pos,
-            shot.pos,
-            MATCH_CONFIG.ball.goalkeeperCatchRadius,
-          );
-          setControlledBall(state, goalkeeper, { ...shot.pos });
-          emit(state, {
-            type: "SAVE",
-            team: goalkeeper.side,
-            playerId: goalkeeper.card.playerId,
-            runtimeId: goalkeeper.runtimeId,
-            message: `${goalkeeper.card.shortName} capte le tir sur sa trajectoire.`,
-          });
-          return true;
-        }
-
-        const awayFromGoal = attackDirection(goalkeeper.side);
-        const rebound = normalizeVector({
-          x: awayFromGoal + state.rng.between(-0.18, 0.18),
-          y: state.rng.between(-0.65, 0.65),
-        });
-        shot.pos = { ...segmentEnd };
-        shot.velocity = {
-          x: rebound.x * Math.max(0.10, ballSpeed * 0.42),
-          y: rebound.y * Math.max(0.10, ballSpeed * 0.42),
-        };
-        shot.deceleration = MATCH_CONFIG.ball.reboundDeceleration;
-        shot.kind = "REBOUND";
-        shot.lastTouchTeamIndex = goalkeeper.teamIndex;
-        shot.lastTouchPlayerId = goalkeeper.runtimeId;
-        emit(state, {
-          type: "SAVE",
-          team: goalkeeper.side,
-          playerId: goalkeeper.card.playerId,
-          runtimeId: goalkeeper.runtimeId,
-          message: `${goalkeeper.card.shortName} repousse le tir !`,
-        });
-        return true;
-      }
-    }
-  }
-
-  // Un défenseur placé physiquement sur la trajectoire peut contrer le tir.
-  const blockers = defendingTeam.players
-    .filter(
-      (player) =>
-        player.active &&
-        player.assignedPosition !== "GK" &&
-        player.runtimeId !== shot.actorId &&
-        player.stunnedUntil <= state.t,
-    )
-    .map((player) => ({
-      player,
-      distance: pointToSegmentDistance(player.pos, segmentStart, segmentEnd),
-    }))
-    .filter(({ distance }) => distance <= 0.010)
-    .sort((a, b) => a.distance - b.distance);
-
-  const blocker = blockers[0]?.player;
-  if (blocker?.assignedPosition) {
-    const stats = effectiveStats({
-      player: blocker.card,
-      assignedPosition: blocker.assignedPosition,
-      energy: blocker.energy,
-      synergyBonus: blocker.synergyBonus,
-    });
-    const blockProbability = clamp(
-      0.22 + 0.28 * (stats.physical / 100) + 0.25 * (stats.intelligence / 100),
-      0.15,
-      0.78,
-    );
-    if (state.rng.chance(blockProbability)) {
-      const current = normalizeVector(shot.velocity);
-      const deflected = rotateVector(
-        current,
-        state.rng.between(-0.85, 0.85),
-      );
-      shot.velocity = {
-        x: deflected.x * ballSpeed * 0.52,
-        y: deflected.y * ballSpeed * 0.52,
-      };
-      shot.deceleration = MATCH_CONFIG.ball.reboundDeceleration;
-      shot.kind = "DEFLECTION";
-      shot.lastTouchTeamIndex = blocker.teamIndex;
-      shot.lastTouchPlayerId = blocker.runtimeId;
-      return true;
-    }
-  }
-
-  return false;
-}
-
-type BoundaryCrossing = {
-  boundary: "LEFT_GOAL_LINE" | "RIGHT_GOAL_LINE" | "TOP_TOUCHLINE" | "BOTTOM_TOUCHLINE";
-  point: Vec2;
-  fraction: number;
-};
-
-function detectPitchBoundaryCrossing(
-  from: Vec2,
-  to: Vec2,
-): BoundaryCrossing | null {
-  const candidates: Array<{ boundary: BoundaryCrossing["boundary"]; point: Vec2; t: number }> = [];
-
-  const addX = (x: number, boundary: BoundaryCrossing["boundary"]) => {
-    const dx = to.x - from.x;
-    if (Math.abs(dx) < 1e-9) return;
-    const t = (x - from.x) / dx;
-    if (t > 0 && t <= 1) {
-      const y = from.y + (to.y - from.y) * t;
-      if (y >= 0 && y <= 1) candidates.push({ boundary, point: { x, y }, t });
-    }
-  };
-  const addY = (y: number, boundary: BoundaryCrossing["boundary"]) => {
-    const dy = to.y - from.y;
-    if (Math.abs(dy) < 1e-9) return;
-    const t = (y - from.y) / dy;
-    if (t > 0 && t <= 1) {
-      const x = from.x + (to.x - from.x) * t;
-      if (x >= 0 && x <= 1) candidates.push({ boundary, point: { x, y }, t });
-    }
-  };
-
-  if (to.x < 0) addX(0, "LEFT_GOAL_LINE");
-  if (to.x > 1) addX(1, "RIGHT_GOAL_LINE");
-  if (to.y < 0) addY(0, "TOP_TOUCHLINE");
-  if (to.y > 1) addY(1, "BOTTOM_TOUCHLINE");
-
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => a.t - b.t);
-  const { boundary, point, t } = candidates[0];
-  return { boundary, point, fraction: t };
-}
-
 function handleBoundaryCrossing(
   state: MatchState,
   crossing: BoundaryCrossing,
@@ -1295,36 +1129,13 @@ function handleBoundaryCrossing(
 ): void {
   if (state.ball.mode !== "LOOSE") return;
   const ball = state.ball;
-  const lastTouchTeam = ball.lastTouchTeamIndex ?? ball.sourceTeamIndex ?? state.possessionTeamIndex;
-
-  if (
-    crossing.boundary === "TOP_TOUCHLINE" ||
-    crossing.boundary === "BOTTOM_TOUCHLINE"
-  ) {
-    const restartTeam = otherTeamIndex(lastTouchTeam);
-    scheduleRestart(state, {
-      type: "THROW_IN",
-      teamIndex: restartTeam,
-      spot: {
-        x: clamp(crossing.point.x, 0.03, 0.97),
-        y: crossing.boundary === "TOP_TOUCHLINE" ? 0 : 1,
-      },
-      pause: MATCH_CONFIG.setPieces.throwInPause,
-      preserveScene: true,
-      occurredAt: crossingTime,
-    });
-    return;
-  }
-
-  const isLeft = crossing.boundary === "LEFT_GOAL_LINE";
-  const defendingTeamIndex: TeamIndex = isLeft ? 0 : 1;
-  const attackingTeamIndex = otherTeamIndex(defendingTeamIndex);
-  const betweenPosts =
-    crossing.point.y >= MATCH_CONFIG.ball.goalMouthMinY &&
-    crossing.point.y <= MATCH_CONFIG.ball.goalMouthMaxY;
-
-  if (betweenPosts) {
-    registerPhysicalGoal(state, attackingTeamIndex, ball);
+  const decision = classifyBoundaryCrossing(
+    crossing,
+    ball,
+    state.possessionTeamIndex,
+  );
+  if (decision.kind === "GOAL") {
+    registerPhysicalGoal(state, decision.scoringTeamIndex, ball);
     return;
   }
 
@@ -1345,29 +1156,19 @@ function handleBoundaryCrossing(
     });
   }
 
-  if (lastTouchTeam === defendingTeamIndex) {
-    const cornerY = crossing.point.y < 0.5 ? 0 : 1;
-    scheduleRestart(state, {
-      type: "CORNER",
-      teamIndex: attackingTeamIndex,
-      spot: { x: isLeft ? 0 : 1, y: cornerY },
-      pause: MATCH_CONFIG.setPieces.cornerPause,
-      preserveScene: true,
-      occurredAt: crossingTime,
-    });
-  } else {
-    scheduleRestart(state, {
-      type: "GOAL_KICK",
-      teamIndex: defendingTeamIndex,
-      spot: {
-        x: isLeft ? 0.07 : 0.93,
-        y: 0.5,
-      },
-      pause: MATCH_CONFIG.setPieces.goalKickPause,
-      preserveScene: true,
-      occurredAt: crossingTime,
-    });
-  }
+  const pause = decision.kind === "THROW_IN"
+    ? MATCH_CONFIG.setPieces.throwInPause
+    : decision.kind === "CORNER"
+      ? MATCH_CONFIG.setPieces.cornerPause
+      : MATCH_CONFIG.setPieces.goalKickPause;
+  scheduleRestart(state, {
+    type: decision.kind,
+    teamIndex: decision.teamIndex,
+    spot: decision.spot,
+    pause,
+    preserveScene: true,
+    occurredAt: crossingTime,
+  });
 }
 
 function registerPhysicalGoal(
@@ -1511,7 +1312,7 @@ function attemptDefensiveDuel(
       runtimeId: defender.runtimeId,
       message: `${defender.card.shortName} récupère le ballon sur ${owner.card.shortName}.`,
     });
-    maybeInjuryFromContact(state, owner, defender);
+    maybeInjuryFromContact(state, owner, defender, DISCIPLINE_HOOKS);
     return true;
   }
 
@@ -1519,165 +1320,12 @@ function attemptDefensiveDuel(
   // L'agressivité détaillée du dataset pourra être réintroduite plus tard.
   const foulProbability = 0.04;
   if (state.rng.chance(foulProbability)) {
-    handleFoul(state, defender, owner);
+    handleFoul(state, defender, owner, DISCIPLINE_HOOKS);
     return true;
   }
 
-  maybeInjuryFromContact(state, owner, defender);
+  maybeInjuryFromContact(state, owner, defender, DISCIPLINE_HOOKS);
   return false;
-}
-
-function handleFoul(
-  state: MatchState,
-  defender: RuntimePlayer,
-  victim: RuntimePlayer,
-): void {
-  const team = state.teams[defender.teamIndex];
-  team.stats.fouls += 1;
-
-  emit(state, {
-    type: "FOUL",
-    team: defender.side,
-    playerId: defender.card.playerId,
-    runtimeId: defender.runtimeId,
-    message: `Faute de ${defender.card.shortName} sur ${victim.card.shortName}.`,
-  });
-
-  const severity = state.rng.next();
-  if (severity < 0.018) {
-    giveRedCard(state, defender, "carton rouge direct");
-  } else if (severity < 0.29) {
-    giveYellowCard(state, defender);
-  }
-
-  maybeInjuryFromContact(state, victim, defender, 1.8);
-
-  const penalty = isInsideOwnPenaltyArea(victim.pos, defender.side);
-  scheduleRestart(state, {
-    type: penalty ? "PENALTY" : "FREE_KICK",
-    teamIndex: victim.teamIndex,
-    spot: penalty ? penaltySpotForAttack(victim.side) : { ...victim.pos },
-    pause: penalty
-      ? MATCH_CONFIG.setPieces.penaltyPause
-      : MATCH_CONFIG.setPieces.freeKickPause,
-    message: penalty
-      ? `Penalty pour ${state.teams[victim.teamIndex].name} !`
-      : `Coup franc pour ${state.teams[victim.teamIndex].name}.`,
-  });
-}
-
-function giveYellowCard(state: MatchState, player: RuntimePlayer): void {
-  player.yellowCards += 1;
-  state.teams[player.teamIndex].stats.yellowCards += 1;
-
-  emit(state, {
-    type: "YELLOW_CARD",
-    team: player.side,
-    playerId: player.card.playerId,
-    runtimeId: player.runtimeId,
-    message: `Carton jaune pour ${player.card.shortName}.`,
-  });
-
-  if (player.yellowCards >= 2) {
-    giveRedCard(state, player, "deuxième carton jaune");
-  }
-}
-
-function giveRedCard(
-  state: MatchState,
-  player: RuntimePlayer,
-  reason: string,
-): void {
-  if (player.redCard) {
-    return;
-  }
-
-  player.redCard = true;
-  player.active = false;
-  state.teams[player.teamIndex].stats.redCards += 1;
-
-  emit(state, {
-    type: "RED_CARD",
-    team: player.side,
-    playerId: player.card.playerId,
-    runtimeId: player.runtimeId,
-    message: `${player.card.shortName} est expulsé (${reason}).`,
-  });
-
-  state.notifications.suspensions.push({
-    team: player.side,
-    playerId: player.card.playerId,
-    playerName: player.card.shortName,
-    matches: 1,
-    reason,
-  });
-
-  if (
-    state.ball.mode === "CONTROLLED" &&
-    state.ball.ownerId === player.runtimeId
-  ) {
-    state.ball = {
-      mode: "LOOSE",
-      pos: { ...player.pos },
-      age: 0,
-      velocity: { x: 0, y: 0 },
-      deceleration: MATCH_CONFIG.ball.passDeceleration,
-      lastTouchTeamIndex: player.teamIndex,
-      lastTouchPlayerId: player.runtimeId,
-    };
-  }
-
-  recomputeSynergy(state.teams[player.teamIndex]);
-}
-
-function maybeInjuryFromContact(
-  state: MatchState,
-  victim: RuntimePlayer,
-  other: RuntimePlayer,
-  multiplier = 1,
-): void {
-  if (victim.injured || !victim.active) {
-    return;
-  }
-
-  const fatigueFactor = 1 + (100 - victim.energy) / 80;
-  const physicalProtection = 1.25 - victim.card.stats.physical / 200;
-  const probability =
-    0.0012 * multiplier * fatigueFactor * physicalProtection;
-
-  if (!state.rng.chance(probability)) {
-    return;
-  }
-
-  victim.injured = true;
-
-  emit(state, {
-    type: "INJURY",
-    team: victim.side,
-    playerId: victim.card.playerId,
-    runtimeId: victim.runtimeId,
-    message: `${victim.card.shortName} est blessé.`,
-  });
-
-  state.notifications.injuries.push({
-    team: victim.side,
-    playerId: victim.card.playerId,
-    playerName: victim.card.shortName,
-    unavailableMatches: 1,
-  });
-
-  queueSubstitution(state, victim, "blessure");
-
-  // Petit risque de blessure secondaire sur un choc violent.
-  if (
-    multiplier > 1.5 &&
-    other.active &&
-    !other.injured &&
-    state.rng.chance(probability * 0.12)
-  ) {
-    other.injured = true;
-    queueSubstitution(state, other, "blessure");
-  }
 }
 
 function goalkeeperMayChaseLooseBall(
@@ -1938,27 +1586,6 @@ function tryControlLooseBall(
     setControlledBall(state, player, { ...looseBall.pos });
     return;
   }
-}
-
-function predictLooseBallStop(ball: LooseBall): Vec2 {
-  const velocity = ball.velocity ?? { x: 0, y: 0 };
-  const speed = vectorLength(velocity);
-  if (speed <= MATCH_CONFIG.ball.looseBallStopSpeed) {
-    return { ...ball.pos };
-  }
-
-  const deceleration =
-    ball.deceleration ?? MATCH_CONFIG.ball.passDeceleration;
-  const stopDistance = (speed * speed) / (2 * Math.max(deceleration, 0.001));
-  const direction = normalizeVector(velocity);
-
-  return {
-    // Une balle encore dans le terrain doit rester atteignable jusque très
-    // près des lignes. Les anciennes marges pouvaient créer une balle
-    // immobile à y≈0.996 tandis que les joueurs restaient bloqués à 0.975.
-    x: clamp(ball.pos.x + direction.x * stopDistance, 0.005, 0.995),
-    y: clamp(ball.pos.y + direction.y * stopDistance, 0.005, 0.995),
-  };
 }
 
 function setControlledBall(
@@ -2444,252 +2071,15 @@ function updateMovement(state: MatchState, dt: number): void {
 }
 
 
-type ScheduleRestartParams = {
-  type: RestartType;
-  teamIndex: TeamIndex;
-  spot: Vec2;
-  pause: number;
-  message?: string;
-  emitStartEvent?: boolean;
-  preserveScene?: boolean;
-  occurredAt?: number;
-};
-
 function scheduleRestart(
   state: MatchState,
   params: ScheduleRestartParams,
 ): void {
-  const team = state.teams[params.teamIndex];
-  const spot = {
-    x: clamp(params.spot.x, 0, 1),
-    y: clamp(params.spot.y, 0, 1),
-  };
-  const taker = selectRestartTaker(state, params.type, params.teamIndex, spot);
-  if (!taker) return;
-
-  const directShotPreferred =
-    params.type === "PENALTY" ||
-    (params.type === "FREE_KICK" &&
-      distanceBetween(spot, opponentGoal(team.side)) <=
-        MATCH_CONFIG.setPieces.closeFreeKickDistance);
-  const wallPlayerIds =
-    params.type === "FREE_KICK" && directShotPreferred
-      ? selectWallPlayers(state, otherTeamIndex(params.teamIndex), spot)
-      : [];
-
-  const deadBallPos = params.preserveScene
-    ? { ...state.ball.pos }
-    : { ...spot };
-  state.ball = { mode: "DEAD", pos: deadBallPos };
-  state.restart = {
-    type: params.type,
-    teamIndex: params.teamIndex,
-    spot,
-    takerId: taker.runtimeId,
-    resumeAt: (params.occurredAt ?? state.t) + params.pause,
-    directShotPreferred,
-    wallPlayerIds,
-    countsForAddedTime: params.type !== "KICKOFF" || state.t > 0,
-  };
-  state.possessionTeamIndex = params.teamIndex;
-
-  const stats = team.stats;
-  switch (params.type) {
-    case "THROW_IN": stats.throwIns += 1; break;
-    case "CORNER": stats.corners += 1; break;
-    case "GOAL_KICK": stats.goalKicks += 1; break;
-    case "FREE_KICK": stats.freeKicks += 1; break;
-    case "PENALTY": stats.penalties += 1; break;
-    default: break;
-  }
-
-  if (!params.preserveScene) {
-    positionPlayersForRestart(state, state.restart);
-  } else {
-    // Pendant la courte présentation de la sortie, les joueurs restent dans
-    // la scène de l'action qui vient de se terminer. Le repositionnement
-    // complet n'a lieu qu'au moment de la remise en jeu.
-    for (const player of state.allPlayers) {
-      if (!player.active) continue;
-      player.target = { ...player.pos };
-      player.runTarget = null;
-      player.runUntil = 0;
-    }
-  }
-
-  if (params.emitStartEvent ?? true) {
-    const defaultMessage = restartDefaultMessage(params.type, team.name);
-    emitAt(state, params.occurredAt ?? state.t, {
-      type: params.type,
-      team: team.side,
-      playerId: taker.card.playerId,
-      runtimeId: taker.runtimeId,
-      message: params.message ?? defaultMessage,
-    });
-  }
+  scheduleRestartController(state, params, RESTART_HOOKS);
 }
 
 function executeRestart(state: MatchState): void {
-  const restart = state.restart;
-  if (!restart) return;
-
-  const team = state.teams[restart.teamIndex];
-  // Les sorties conservent la scène précédente pendant leur pause visuelle.
-  // On replace maintenant toutes les équipes juste avant la remise en jeu.
-  positionPlayersForRestart(state, restart);
-  let taker = getPlayer(state, restart.takerId);
-  if (!taker?.active) {
-    taker = selectRestartTaker(state, restart.type, restart.teamIndex, restart.spot);
-  }
-  if (!taker) {
-    state.restart = null;
-    return;
-  }
-
-  taker.pos = { ...restart.spot };
-  taker.target = { ...restart.spot };
-  state.restart = null;
-
-  if (restart.type === "KICKOFF") {
-    setControlledBall(state, taker);
-    if (state.recordReplay) {
-      // Remplace le dernier frame de l'ancienne scène au même timestamp :
-      // le commentaire et le replay montrent bien les 22 joueurs dans leur
-      // camp avant la première passe.
-      captureFrame(state);
-    }
-    emit(state, {
-      type: "KICKOFF",
-      team: team.side,
-      playerId: taker.card.playerId,
-      runtimeId: taker.runtimeId,
-      message: `${team.name} remet le ballon en jeu.`,
-    });
-    return;
-  }
-
-  if (restart.type === "PENALTY") {
-    setControlledBall(state, taker);
-    startShot(state, taker, "PENALTY");
-    return;
-  }
-
-  if (restart.type === "FREE_KICK" && restart.directShotPreferred) {
-    const stats = taker.assignedPosition
-      ? effectiveStats({
-          player: taker.card,
-          assignedPosition: taker.assignedPosition,
-          energy: taker.energy,
-          synergyBonus: taker.synergyBonus,
-        })
-      : null;
-    const directChance = stats
-      ? clamp(0.25 + 0.42 * (stats.intelligence / 100) + 0.18 * (stats.shooting / 100), 0.2, 0.82)
-      : 0.35;
-    if (state.rng.chance(directChance)) {
-      setControlledBall(state, taker);
-      startShot(state, taker, "FREE_KICK");
-      return;
-    }
-  }
-
-  const target = selectRestartPassTarget(state, restart, taker);
-  if (target) {
-    setControlledBall(state, taker);
-    startPass(state, taker, target.runtimeId, {
-      skipOffside: true,
-      setPieceOrigin: restart.type,
-    });
-  } else {
-    setControlledBall(state, taker);
-  }
-}
-
-function restartDefaultMessage(type: RestartType, teamName: string): string {
-  switch (type) {
-    case "THROW_IN": return `Touche pour ${teamName}.`;
-    case "CORNER": return `Corner pour ${teamName}.`;
-    case "GOAL_KICK": return `Six mètres pour ${teamName}.`;
-    case "FREE_KICK": return `Coup franc pour ${teamName}.`;
-    case "PENALTY": return `Penalty pour ${teamName} !`;
-    case "KICKOFF": return `Coup d'envoi pour ${teamName}.`;
-  }
-}
-
-function selectRestartTaker(
-  state: MatchState,
-  type: RestartType,
-  teamIndex: TeamIndex,
-  spot: Vec2,
-): RuntimePlayer | undefined {
-  const team = state.teams[teamIndex];
-  const active = team.players.filter((player) => player.active && !player.redCard && !player.injured);
-  if (type === "GOAL_KICK") {
-    return findActiveBySlot(team, "GK") ?? active[0];
-  }
-  if (type === "PENALTY") {
-    return [...active]
-      .filter((player) => player.assignedPosition !== "GK")
-      .sort((a, b) => b.card.stats.shooting - a.card.stats.shooting)[0];
-  }
-
-  const outfield = active.filter((player) => player.assignedPosition !== "GK");
-  if (type === "FREE_KICK") {
-    return [...outfield]
-      .sort((a, b) => {
-        const da = distanceBetween(a.pos, spot) - (a.card.stats.shooting + a.card.stats.passing) / 2500;
-        const db = distanceBetween(b.pos, spot) - (b.card.stats.shooting + b.card.stats.passing) / 2500;
-        return da - db;
-      })[0];
-  }
-  return [...outfield].sort((a, b) => distanceBetween(a.pos, spot) - distanceBetween(b.pos, spot))[0];
-}
-
-function selectRestartPassTarget(
-  state: MatchState,
-  restart: RestartState,
-  taker: RuntimePlayer,
-): RuntimePlayer | undefined {
-  const teammates = state.teams[restart.teamIndex].players.filter(
-    (player) => player.active && player.runtimeId !== taker.runtimeId,
-  );
-
-  if (restart.type === "CORNER") {
-    return [...teammates]
-      .filter((player) => player.assignedPosition !== "GK")
-      .sort((a, b) => {
-        const aScore = a.card.stats.physical * 0.55 + a.card.stats.shooting * 0.45;
-        const bScore = b.card.stats.physical * 0.55 + b.card.stats.shooting * 0.45;
-        return bScore - aScore;
-      })[0];
-  }
-
-  if (restart.type === "GOAL_KICK") {
-    const preferred = teammates.filter((player) => ["CB", "LB", "RB", "CDM"].includes(player.assignedPosition ?? ""));
-    return state.rng.pick(preferred.length > 0 ? preferred : teammates);
-  }
-
-  return [...teammates]
-    .filter((player) => player.assignedPosition !== "GK")
-    .sort((a, b) => distanceBetween(a.pos, restart.spot) - distanceBetween(b.pos, restart.spot))[0];
-}
-
-function selectWallPlayers(
-  state: MatchState,
-  defendingTeamIndex: TeamIndex,
-  spot: Vec2,
-): string[] {
-  const team = state.teams[defendingTeamIndex];
-  const count = clamp(
-    Math.round(3 + (1 - distanceBetween(spot, opponentGoal(state.teams[otherTeamIndex(defendingTeamIndex)].side))) * 2),
-    MATCH_CONFIG.setPieces.wallMinPlayers,
-    MATCH_CONFIG.setPieces.wallMaxPlayers,
-  );
-  return team.players
-    .filter((player) => player.active && player.assignedPosition !== "GK")
-    .sort((a, b) => distanceBetween(a.pos, spot) - distanceBetween(b.pos, spot))
-    .slice(0, count)
-    .map((player) => player.runtimeId);
+  executeRestartController(state, RESTART_HOOKS);
 }
 
 function positionTeamsForKickoff(
@@ -2857,23 +2247,6 @@ function positionPlayersForRestart(
       player.target = { ...player.pos };
     });
   }
-}
-
-function isInsideOwnPenaltyArea(pos: Vec2, defendingSide: TeamSide): boolean {
-  const progress = toTeamProgress(pos.x, defendingSide);
-  return (
-    progress <= MATCH_CONFIG.setPieces.penaltyAreaDepth &&
-    Math.abs(pos.y - 0.5) <= MATCH_CONFIG.setPieces.penaltyAreaHalfWidth
-  );
-}
-
-function penaltySpotForAttack(attackingSide: TeamSide): Vec2 {
-  return {
-    x: attackingSide === "HOME"
-      ? 1 - MATCH_CONFIG.setPieces.penaltySpotDistanceFromGoal
-      : MATCH_CONFIG.setPieces.penaltySpotDistanceFromGoal,
-    y: 0.5,
-  };
 }
 
 function logicalExtraToDisplayedMinutes(
