@@ -11,7 +11,10 @@ export async function GET() {
   try {
     cached ??= createOpponentCatalog(loadPlayers());
     return NextResponse.json(cached, {
-      headers: { "Cache-Control": "public, max-age=3600" },
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+        "X-Team-Catalog-Size": String(cached.length),
+      },
     });
   } catch (error) {
     return NextResponse.json(

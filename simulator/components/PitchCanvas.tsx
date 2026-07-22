@@ -15,11 +15,12 @@ type Props = {
   homeColor: string;
   awayColor: string;
   pitchMaxWidth: number;
+  fitViewport?: boolean;
 };
 
 type InterpolatedPlayer = ReplayPlayerFrame;
 
-export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Props) {
+export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth, fitViewport = false }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationRef = useRef<number | null>(null);
   const lastTimestampRef = useRef<number | null>(null);
@@ -175,6 +176,12 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
   }, [awayColor, homeColor, metadata, snapshot]);
 
   const clockLabel = snapshot ? formatMatchClock(snapshot) : "0:00";
+  const viewerStyle = {
+    maxWidth: `${pitchMaxWidth}px`,
+    width: fitViewport
+      ? `min(100%, clamp(280px, calc((100svh - 310px) * 0.7069), ${pitchMaxWidth}px))`
+      : "100%",
+  };
 
   function resetPlaybackEventState() {
     setEventOverlay(null);
@@ -206,7 +213,7 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
       <div className="pitch-column">
         <div
           className="match-scoreboard"
-          style={{ maxWidth: `${pitchMaxWidth}px` }}
+          style={viewerStyle}
         >
           <span className="score-team score-team-home">
             <i className="score-team-dot" style={{ background: homeColor }} />
@@ -224,7 +231,7 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth }: Pro
 
         <div
           className="pitch-stage pitch-stage-vertical"
-          style={{ maxWidth: `${pitchMaxWidth}px` }}
+          style={viewerStyle}
         >
           <canvas
             ref={canvasRef}
@@ -659,7 +666,7 @@ function drawScene(
     ctx.font = isGoalkeeper ? "900 9px sans-serif" : "800 11px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(isGoalkeeper ? "GK" : String(meta.shirtNumber), screen.x, screen.y);
+    ctx.fillText(isGoalkeeper ? "G" : String(meta.shirtNumber), screen.x, screen.y);
 
     ctx.font = "600 10px sans-serif";
     ctx.textBaseline = "top";

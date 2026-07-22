@@ -6,11 +6,11 @@ import { usePathname } from "next/navigation";
 const SQUAD_LINKS = [
   { href: "/squad", label: "Équipes", exact: true },
   { href: "/squad/match", label: "Matchs" },
-  { href: "/squad/tests", label: "Tests Monte-Carlo" },
+  { href: "/squad/tests", label: "Simulateur" },
 ];
 const ENGINE_LINKS = [
-  { href: "/", label: "Simulateur", exact: true },
-  { href: "/analytics", label: "Balance Lab" },
+  { href: "/", label: "Partie rapide", exact: true },
+  { href: "/analytics", label: "Monte Carlo Lab" },
 ];
 
 export function ProductNav() {

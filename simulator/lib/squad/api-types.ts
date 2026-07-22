@@ -29,8 +29,11 @@ export interface SquadOpponent {
   id: string;
   nation: string;
   name: string;
+  flag: string;
+  confederation: "AFC" | "CAF" | "Concacaf" | "CONMEBOL" | "OFC" | "UEFA";
   selection: TeamSelection;
   players: PlayerCard[];
+  syntheticPlayers: number;
 }
 
 export interface SquadTeamAverage {
@@ -119,7 +122,10 @@ export interface SquadPreviewResponse {
     homeShots: SquadDistribution;
     homePossession: SquadDistribution;
   };
-  players: SquadPlayerAverage[];
+  players: {
+    home: SquadPlayerAverage[];
+    away: SquadPlayerAverage[];
+  };
   reliability: "LOW" | "MEDIUM" | "HIGH";
 }
 

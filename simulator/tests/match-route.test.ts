@@ -22,11 +22,11 @@ describe("POST /api/matches/simulate", () => {
     expect(response.status).toBe(200);
     expect(payload.contractVersion).toBe("1.0.0");
     expect(payload.result).toMatchObject({
-      homeName: "Paris AI",
-      awayName: "World XI",
+      homeName: "France 2026",
+      awayName: "Argentine 2026",
     });
-    expect(payload.playerStats.home).toHaveLength(16);
-    expect(payload.playerStats.away).toHaveLength(16);
+    expect(payload.playerStats.home).toHaveLength(18);
+    expect(payload.playerStats.away).toHaveLength(18);
     expect(payload.playerStats.home[0]).toHaveProperty("minutesPlayed");
   });
 

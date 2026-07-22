@@ -62,10 +62,16 @@ export function runSquadMonteCarlo(params: {
         matches.map((match) => match.stats.home.possession),
       ),
     },
-    players: aggregatePlayers(
-      matches.flatMap((match) => match.playerStats.home),
-      params.runs,
-    ),
+    players: {
+      home: aggregatePlayers(
+        matches.flatMap((match) => match.playerStats.home),
+        params.runs,
+      ),
+      away: aggregatePlayers(
+        matches.flatMap((match) => match.playerStats.away),
+        params.runs,
+      ),
+    },
     reliability: params.runs >= 50 ? "HIGH" : params.runs >= 30 ? "MEDIUM" : "LOW",
   };
 }

@@ -16,9 +16,8 @@ import {
 import { simulateMatch } from "@/lib/game";
 import {
   assertSelectionPlayersExist,
-  DEFAULT_AWAY_SELECTION,
-  DEFAULT_HOME_SELECTION,
 } from "@/lib/game/sample-teams";
+import { createInternationalTeamContext } from "@/lib/squad/opponents";
 import type {
   MatchSpatialAnalytics,
   PlayerMatchStats,
@@ -35,6 +34,8 @@ type RequestBody = {
   runs?: number;
   seedPrefix?: string;
   sensitivity?: boolean;
+  home?: TeamSelection;
+  away?: TeamSelection;
 };
 
 type MatchSummary = {
@@ -55,15 +56,18 @@ export async function POST(request: Request) {
     const seedPrefix = body.seedPrefix?.trim() || "mc";
     const includeSensitivity = body.sensitivity ?? true;
 
-    const players = loadPlayers();
-    assertSelectionPlayersExist(DEFAULT_HOME_SELECTION, players);
-    assertSelectionPlayersExist(DEFAULT_AWAY_SELECTION, players);
+    const context = createInternationalTeamContext(loadPlayers());
+    const players = context.players;
+    const home = body.home ?? context.opponents.find((team) => team.id === "france-2026")!.selection;
+    const away = body.away ?? context.opponents.find((team) => team.id === "argentina-2026")!.selection;
+    assertSelectionPlayersExist(home, players);
+    assertSelectionPlayersExist(away, players);
 
     const startedAt = performance.now();
     const baselineMatches = runBatch({
       players,
-      home: DEFAULT_HOME_SELECTION,
-      away: DEFAULT_AWAY_SELECTION,
+      home,
+      away,
       seedPrefix,
       runs,
       recordSpatialAnalytics: true,
@@ -80,6 +84,8 @@ export async function POST(request: Request) {
             seedPrefix,
             runs,
             baselineMatches,
+            home,
+            away,
           }),
         )
       : [];
@@ -90,6 +96,8 @@ export async function POST(request: Request) {
           seedPrefix,
           runs,
           configuredMatches: baselineMatches,
+          home,
+          away,
         })
       : null;
 
@@ -187,6 +195,8 @@ function runSensitivityExperiment(params: {
   seedPrefix: string;
   runs: number;
   baselineMatches: MatchSummary[];
+  home: TeamSelection;
+  away: TeamSelection;
 }) {
   const playerMap = new Map(
     params.players.map((player) => [player.playerId, player]),
@@ -196,7 +206,7 @@ function runSensitivityExperiment(params: {
   const boostedStarterIds: Record<string, number> = {};
 
   for (const [slot, originalPlayerId] of Object.entries(
-    DEFAULT_HOME_SELECTION.starters,
+    params.home.starters,
   )) {
     const original = playerMap.get(originalPlayerId);
     if (!original) {
@@ -223,14 +233,14 @@ function runSensitivityExperiment(params: {
   }
 
   const boostedHome: TeamSelection = {
-    ...DEFAULT_HOME_SELECTION,
+    ...params.home,
     starters: boostedStarterIds,
   };
 
   const boostedMatches = runBatch({
     players: boostedPlayers,
     home: boostedHome,
-    away: DEFAULT_AWAY_SELECTION,
+    away: params.away,
     seedPrefix: params.seedPrefix,
     runs: params.runs,
   });
@@ -319,11 +329,13 @@ function runRoleExperiment(params: {
   seedPrefix: string;
   runs: number;
   configuredMatches: MatchSummary[];
+  home: TeamSelection;
+  away: TeamSelection;
 }) {
   const neutralHome: TeamSelection = {
-    ...DEFAULT_HOME_SELECTION,
+    ...params.home,
     roles: Object.fromEntries(
-      Object.keys(DEFAULT_HOME_SELECTION.starters).map((slot) => [
+      Object.keys(params.home.starters).map((slot) => [
         slot,
         "NORMAL",
       ]),
@@ -333,7 +345,7 @@ function runRoleExperiment(params: {
   const neutralMatches = runBatch({
     players: params.players,
     home: neutralHome,
-    away: DEFAULT_AWAY_SELECTION,
+    away: params.away,
     seedPrefix: params.seedPrefix,
     runs: params.runs,
   });

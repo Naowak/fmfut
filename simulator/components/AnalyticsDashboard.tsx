@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   MonteCarloResponse,
   SensitivityResult,
   SpatialTeamAggregate,
 } from "@/lib/analytics/types";
 import type { Position } from "@/lib/game/types";
+import { positionShortLabel } from "@/lib/game/localization";
+import type { SquadOpponent } from "@/lib/squad/api-types";
 
 const HEATMAP_POSITIONS: Array<"ALL" | Position> = [
   "ALL",
@@ -33,6 +35,24 @@ export function AnalyticsDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [heatmapTeam, setHeatmapTeam] = useState<"HOME" | "AWAY">("HOME");
   const [heatmapPosition, setHeatmapPosition] = useState<"ALL" | Position>("ALL");
+  const [teams, setTeams] = useState<SquadOpponent[]>([]);
+  const [homeId, setHomeId] = useState("france-2026");
+  const [awayId, setAwayId] = useState("argentina-2026");
+  const resultsRef = useRef<HTMLDivElement | null>(null);
+  const homeTeam = teams.find((team) => team.id === homeId) ?? null;
+  const awayTeam = teams.find((team) => team.id === awayId) ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/squad/opponents", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as SquadOpponent[] | { error: string };
+        if (!response.ok || !Array.isArray(payload)) throw new Error(!Array.isArray(payload) && "error" in payload ? payload.error : "Sélections indisponibles.");
+        if (!cancelled) setTeams(payload);
+      })
+      .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : "Sélections indisponibles."); });
+    return () => { cancelled = true; };
+  }, []);
 
   async function runAnalysis() {
     setLoading(true);
@@ -42,7 +62,13 @@ export function AnalyticsDashboard() {
       const response = await fetch("/api/analytics/monte-carlo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ runs, seedPrefix, sensitivity }),
+        body: JSON.stringify({
+          runs,
+          seedPrefix,
+          sensitivity,
+          home: homeTeam?.selection,
+          away: awayTeam?.selection,
+        }),
       });
 
       const payload = (await response.json()) as
@@ -56,6 +82,7 @@ export function AnalyticsDashboard() {
       }
 
       setData(payload);
+      window.setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
     } catch (analysisError) {
       setError(
         analysisError instanceof Error
@@ -82,6 +109,8 @@ export function AnalyticsDashboard() {
   return (
     <div className="analytics-shell">
       <section className="card analytics-controls">
+        <TeamSelect id="lab-home" label="Équipe à domicile" value={homeId} onChange={(value) => { setHomeId(value); setData(null); }} teams={teams} disabledValue={awayId} />
+        <TeamSelect id="lab-away" label="Équipe à l’extérieur" value={awayId} onChange={(value) => { setAwayId(value); setData(null); }} teams={teams} disabledValue={homeId} />
         <div className="field-group">
           <label htmlFor="runs">Nombre de matchs</label>
           <input
@@ -118,7 +147,7 @@ export function AnalyticsDashboard() {
           type="button"
           className="primary-button"
           onClick={runAnalysis}
-          disabled={loading}
+          disabled={loading || !homeTeam || !awayTeam || homeId === awayId}
         >
           {loading ? "Simulation en cours…" : "Lancer Monte-Carlo"}
         </button>
@@ -137,7 +166,7 @@ export function AnalyticsDashboard() {
           </div>
         </section>
       ) : (
-        <>
+        <div ref={resultsRef} className="analytics-results">
           <section className="analytics-kpis">
             <Kpi label="Buts / match" value={data.baseline.averageTotalGoals} />
             <Kpi label="Victoire domicile" value={`${data.baseline.homeWinRate}%`} />
@@ -151,8 +180,8 @@ export function AnalyticsDashboard() {
               <thead>
                 <tr>
                   <th>Métrique</th>
-                  <th>Domicile</th>
-                  <th>Extérieur</th>
+                  <th>{homeTeam ? `${homeTeam.flag} ${homeTeam.name}` : "Domicile"}</th>
+                  <th>{awayTeam ? `${awayTeam.flag} ${awayTeam.name}` : "Extérieur"}</th>
                 </tr>
               </thead>
               <tbody>
@@ -199,8 +228,8 @@ export function AnalyticsDashboard() {
                     value={heatmapTeam}
                     onChange={(event) => setHeatmapTeam(event.target.value as "HOME" | "AWAY")}
                   >
-                    <option value="HOME">Domicile</option>
-                    <option value="AWAY">Extérieur</option>
+                    <option value="HOME">{homeTeam ? `${homeTeam.flag} ${homeTeam.name}` : "Domicile"}</option>
+                    <option value="AWAY">{awayTeam ? `${awayTeam.flag} ${awayTeam.name}` : "Extérieur"}</option>
                   </select>
                   <select
                     value={heatmapPosition}
@@ -208,7 +237,7 @@ export function AnalyticsDashboard() {
                   >
                     {HEATMAP_POSITIONS.map((position) => (
                       <option key={position} value={position}>
-                        {position === "ALL" ? "Tous les joueurs" : position}
+                        {position === "ALL" ? "Tous les joueurs" : positionShortLabel(position)}
                       </option>
                     ))}
                   </select>
@@ -310,8 +339,26 @@ export function AnalyticsDashboard() {
               <p key={note} className="muted">{note}</p>
             ))}
           </section>
-        </>
+        </div>
       )}
+    </div>
+  );
+}
+
+function TeamSelect({ id, label, value, onChange, teams, disabledValue }: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  teams: SquadOpponent[];
+  disabledValue: string;
+}) {
+  return (
+    <div className="field-group national-team-field">
+      <label htmlFor={id}>{label}</label>
+      <select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
+        {teams.map((team) => <option key={team.id} value={team.id} disabled={team.id === disabledValue}>{team.flag} {team.name}</option>)}
+      </select>
     </div>
   );
 }

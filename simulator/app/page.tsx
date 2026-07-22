@@ -7,10 +7,10 @@ export default function HomePage() {
       <ProductNav />
       <header className="hero">
         <div>
-          <p className="eyebrow">FUT MANAGER — MATCH ENGINE</p>
-          <h1>Simulateur de match 2D</h1>
+          <p className="eyebrow">FUT MANAGER — PARTIE RAPIDE</p>
+          <h1>Deux sélections, un match.</h1>
           <p className="hero-copy">
-            Configure l'affichage, lance une simulation déterministe puis analyse le replay.
+            Choisis parmi les 48 sélections, lance une simulation déterministe puis analyse le replay.
             Le résultat est calculé intégralement côté serveur avant la première image.
           </p>
         </div>

@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PitchCanvas } from "./PitchCanvas";
 import { FORMATION_433 } from "@/lib/game/formations";
+import { slotLabel } from "@/lib/game/localization";
 import type { MatchSimulationOutput, PlayerCard } from "@/lib/game/types";
 import type { SquadOpponent } from "@/lib/squad/api-types";
 import { diagnoseSquad, toTeamSelection, type SquadDraft } from "@/lib/squad/builder";
@@ -17,6 +18,7 @@ export function SquadMatchLauncher() {
   const [loading, setLoading] = useState(true);
   const [matchLoading, setMatchLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const replayRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -24,7 +26,7 @@ export function SquadMatchLauncher() {
       try {
         const [loadedDraft, response] = await Promise.all([
           loadSquadDraft(),
-          fetch("/api/squad/opponents"),
+          fetch("/api/squad/opponents", { cache: "no-store" }),
         ]);
         const payload = (await response.json()) as SquadOpponent[] | { error: string };
         if (!response.ok || !Array.isArray(payload)) {
@@ -68,6 +70,7 @@ export function SquadMatchLauncher() {
         throw new Error("error" in payload ? payload.error : "Match impossible.");
       }
       setMatch(payload);
+      window.setTimeout(() => replayRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Match impossible.");
     } finally {
@@ -94,11 +97,11 @@ export function SquadMatchLauncher() {
 
         <section className="card squad-opponent-card">
           <span className="config-kicker">ADVERSAIRE PRÉCOMPOSÉ</span>
-          <h2>Choisir une sélection</h2>
+          <h2>{opponent ? `${opponent.flag} ${opponent.name}` : "Choisir une sélection"}</h2>
           <label className="squad-select-field">
             Équipe
             <select value={opponentId} onChange={(event) => { setOpponentId(event.target.value); setMatch(null); }}>
-              {opponents.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              {opponents.map((item) => <option key={item.id} value={item.id}>{item.flag} {item.name}</option>)}
             </select>
           </label>
           {opponent && (
@@ -108,10 +111,14 @@ export function SquadMatchLauncher() {
                   const player = opponent.players.find(
                     (candidate) => candidate.playerId === opponent.selection.starters[slot.id],
                   );
-                  return <div key={slot.id}><span>{slot.id}</span><strong>{player?.shortName ?? "—"}</strong><small>{player?.overall ?? ""}</small></div>;
+                  return <div key={slot.id}><span>{slotLabel(slot.id)}</span><strong>{player?.shortName ?? "—"}</strong><small>{player?.overall ?? ""}</small></div>;
                 })}
               </div>
-              <p className="muted opponent-note">XI de référence généré avec les meilleurs joueurs compatibles du dataset. Il ne prétend pas reproduire une feuille de match officielle.</p>
+              <div className="opponent-bench">
+                <strong>Remplaçants</strong>
+                <span>{opponent.selection.bench.map((id) => opponent.players.find((player) => player.playerId === id)?.shortName ?? "—").join(" · ")}</span>
+              </div>
+              <p className="muted opponent-note">XI et banc de référence issus du dataset. {opponent.syntheticPlayers > 0 ? `${opponent.syntheticPlayers} réserviste(s) généré(s) complètent les postes absents.` : "Aucun réserviste généré n’est nécessaire."} Ce n’est pas une feuille de match officielle.</p>
             </>
           )}
           <button className="primary-button match-launch-button" type="button" disabled={!diagnostics?.complete || !opponent || matchLoading} onClick={launchMatch}>
@@ -121,11 +128,11 @@ export function SquadMatchLauncher() {
       </div>
 
       {match && (
-        <section className="card squad-replay-card">
+        <section className="card squad-replay-card" ref={replayRef}>
           <div className="squad-section-title">
             <div><span className="config-kicker">MATCH PRÊT</span><h2>{match.result.homeName} contre {match.result.awayName}</h2></div>
           </div>
-          <PitchCanvas replay={match.replay} homeColor="#22c55e" awayColor="#ef4444" pitchMaxWidth={680} />
+          <PitchCanvas replay={match.replay} homeColor="#22c55e" awayColor="#ef4444" pitchMaxWidth={680} fitViewport />
         </section>
       )}
     </div>

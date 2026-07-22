@@ -7,9 +7,8 @@ import {
 } from "@/lib/game";
 import {
   assertSelectionPlayersExist,
-  DEFAULT_AWAY_SELECTION,
-  DEFAULT_HOME_SELECTION,
 } from "@/lib/game/sample-teams";
+import { createInternationalTeamContext } from "@/lib/squad/opponents";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,10 +20,11 @@ export async function POST(request: Request) {
         throw new SyntaxError("Corps JSON invalide.");
       }),
     );
-    const players = loadPlayers();
+    const context = createInternationalTeamContext(loadPlayers());
+    const players = context.players;
 
-    const home = body.home ?? DEFAULT_HOME_SELECTION;
-    const away = body.away ?? DEFAULT_AWAY_SELECTION;
+    const home = body.home ?? context.opponents.find((team) => team.id === "france-2026")!.selection;
+    const away = body.away ?? context.opponents.find((team) => team.id === "argentina-2026")!.selection;
 
     assertSelectionPlayersExist(home, players);
     assertSelectionPlayersExist(away, players);

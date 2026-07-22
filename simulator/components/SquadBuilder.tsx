@@ -3,6 +3,13 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FORMATION_433 } from "@/lib/game/formations";
+import {
+  nationalityLabel,
+  positionLabel,
+  positionShortLabel,
+  roleLabel,
+  slotLabel,
+} from "@/lib/game/localization";
 import type {
   PlayerCard,
   Position,
@@ -211,9 +218,9 @@ export function SquadBuilder() {
           <input className="text-input" aria-label="Rechercher un joueur" placeholder="Nom du joueur…" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} />
           <div className="squad-filter-row">
             <select aria-label="Filtrer par poste" value={position} onChange={(event) => { setPosition(event.target.value as "" | Position); setPage(1); }}>
-              {POSITIONS.map((item) => <option key={item || "ALL"} value={item}>{item || "Tous postes"}</option>)}
+              {POSITIONS.map((item) => <option key={item || "ALL"} value={item}>{item ? positionLabel(item) : "Tous les postes"}</option>)}
             </select>
-            <input aria-label="Overall minimum" type="number" min={1} max={100} placeholder="OVR min" value={minOverall} onChange={(event) => { setMinOverall(event.target.value); setPage(1); }} />
+            <input aria-label="Note générale minimum" type="number" min={1} max={100} placeholder="Note min" value={minOverall} onChange={(event) => { setMinOverall(event.target.value); setPage(1); }} />
           </div>
           <input className="text-input" aria-label="Filtrer par nationalité" placeholder="Nationalité…" value={nation} onChange={(event) => { setNation(event.target.value); setPage(1); }} />
         </div>
@@ -282,15 +289,15 @@ export function SquadBuilder() {
                   }}
                   aria-label={player ? `${slotId}, ${player.shortName}` : `${slotId}, vide`}
                 >
-                  <span className="squad-slot-position">{slotId}</span>
+                  <span className="squad-slot-position">{slotLabel(slotId)}</span>
                   {player ? (
-                    <><strong>{player.shortName}</strong><span>{player.overall} · {player.primaryPosition}</span></>
+                    <><strong>{player.shortName}</strong><span>{player.overall} · {positionShortLabel(player.primaryPosition)}</span></>
                   ) : <span className="squad-slot-empty">Ajouter</span>}
                 </button>
                 {player && (
                   <div className="slot-actions">
                     <select aria-label={`Rôle de ${player.shortName}`} value={draft.roles[slotId] ?? "NORMAL"} onChange={(event) => updateDraft((current) => ({ ...current, roles: { ...current.roles, [slotId]: event.target.value as Role } }))}>
-                      {ROLES.map((role) => <option key={role} value={role}>{role}</option>)}
+                      {ROLES.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>)}
                     </select>
                     <button type="button" aria-label={`Retirer ${player.shortName}`} onClick={() => updateDraft((current) => removePlayer(current, player.playerId))}>×</button>
                   </div>
@@ -311,7 +318,7 @@ export function SquadBuilder() {
               const player = draft.bench[index];
               return player ? (
                 <div className="bench-player" key={player.playerId} draggable onDragStart={(event) => event.dataTransfer.setData("text/player-id", String(player.playerId))}>
-                  <span className="player-overall">{player.overall}</span><div><strong>{player.shortName}</strong><span>{player.primaryPosition} · {player.nationalityName}</span></div>
+                  <span className="player-overall">{player.overall}</span><div><strong>{player.shortName}</strong><span>{positionShortLabel(player.primaryPosition)} · {nationalityLabel(player.nationalityName)}</span></div>
                   <button type="button" onClick={() => updateDraft((current) => removePlayer(current, player.playerId))}>×</button>
                 </div>
               ) : (
@@ -371,9 +378,9 @@ function PlayerSearchCard({ player, selected, inSquad, targetSlot, onSelect, onP
 }) {
   return (
     <article className="player-search-card" data-selected={selected} draggable onDragStart={(event) => event.dataTransfer.setData("text/player-id", String(player.playerId))} onClick={onSelect}>
-      <div className="player-card-heading"><span className="player-overall">{player.overall}</span><div><strong>{player.shortName}</strong><span>{player.primaryPosition} · {player.nationalityName}</span></div>{inSquad && <span className="in-squad-badge">RETENU</span>}</div>
+      <div className="player-card-heading"><span className="player-overall">{player.overall}</span><div><strong>{player.shortName}</strong><span>{positionShortLabel(player.primaryPosition)} · {nationalityLabel(player.nationalityName)}</span></div>{inSquad && <span className="in-squad-badge">RETENU</span>}</div>
       <div className="player-mini-stats">{STATS.map((stat) => <span key={stat}><b>{player.stats[stat]}</b>{STAT_LABELS[stat]}</span>)}</div>
-      <div className="player-card-actions"><button type="button" onClick={(event) => { event.stopPropagation(); onPlace(); }}>Placer en {targetSlot}</button><button type="button" onClick={(event) => { event.stopPropagation(); onBench(); }}>Banc</button></div>
+      <div className="player-card-actions"><button type="button" onClick={(event) => { event.stopPropagation(); onPlace(); }}>Placer en {slotLabel(targetSlot)}</button><button type="button" onClick={(event) => { event.stopPropagation(); onBench(); }}>Banc</button></div>
     </article>
   );
 }
@@ -383,7 +390,7 @@ function ComparisonPanel({ current, candidate, position, benchmark, role }: {
 }) {
   return (
     <section className="card comparison-card">
-      <div className="squad-section-title"><div><span className="config-kicker">COMPARAISON · {position}</span><h2>{candidate ? candidate.shortName : "Sélectionne un joueur"}</h2></div>{candidate && <span className="role-fit">Rôle {roleFitScore(candidate, role)}</span>}</div>
+      <div className="squad-section-title"><div><span className="config-kicker">COMPARAISON · {positionShortLabel(position)}</span><h2>{candidate ? candidate.shortName : "Sélectionne un joueur"}</h2></div>{candidate && <span className="role-fit">Compatibilité rôle {roleFitScore(candidate, role)}</span>}</div>
       {!candidate ? <p className="muted">Choisis une carte dans l’explorateur pour la comparer au titulaire du slot actif.</p> : (
         <div className="comparison-list">
           {STATS.map((stat) => {

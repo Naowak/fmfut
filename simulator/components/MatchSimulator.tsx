@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PitchCanvas } from "./PitchCanvas";
 import type { MatchSimulationOutput } from "@/lib/game/types";
+import type { SquadOpponent } from "@/lib/squad/api-types";
 
 const TEAM_COLORS = [
   { label: "Bleu", value: "#2563eb" },
@@ -16,13 +17,32 @@ const TEAM_COLORS = [
 ];
 
 export function MatchSimulator() {
-  const [seed, setSeed] = useState("demo-42");
+  const [seed, setSeed] = useState("partie-rapide-42");
+  const [teams, setTeams] = useState<SquadOpponent[]>([]);
+  const [homeId, setHomeId] = useState("france-2026");
+  const [awayId, setAwayId] = useState("argentina-2026");
   const [homeColor, setHomeColor] = useState("#2563eb");
   const [awayColor, setAwayColor] = useState("#dc2626");
   const [pitchMaxWidth, setPitchMaxWidth] = useState(580);
   const [match, setMatch] = useState<MatchSimulationOutput | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const viewerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/squad/opponents", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as SquadOpponent[] | { error: string };
+        if (!response.ok || !Array.isArray(payload)) throw new Error(!Array.isArray(payload) && "error" in payload ? payload.error : "Sélections indisponibles.");
+        if (!cancelled) setTeams(payload);
+      })
+      .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : "Sélections indisponibles."); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const home = teams.find((team) => team.id === homeId) ?? null;
+  const away = teams.find((team) => team.id === awayId) ?? null;
 
   async function runSimulation() {
     setLoading(true);
@@ -32,7 +52,7 @@ export function MatchSimulator() {
       const response = await fetch("/api/matches/simulate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ seed }),
+        body: JSON.stringify({ seed, home: home?.selection, away: away?.selection }),
       });
 
       const payload = (await response.json()) as
@@ -46,6 +66,7 @@ export function MatchSimulator() {
       }
 
       setMatch(payload);
+      window.setTimeout(() => viewerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
     } catch (simulationError) {
       setError(
         simulationError instanceof Error
@@ -62,9 +83,9 @@ export function MatchSimulator() {
       <div className="card main-card">
         <div className="simulator-config-header">
           <div>
-            <span className="config-kicker">SIMULATION</span>
-            <h2>Préparer et lancer un match</h2>
-            <p>Le résultat est calculé côté serveur, puis rejoué à l'identique dans le viewer.</p>
+            <span className="config-kicker">PARTIE RAPIDE</span>
+            <h2>Choisis deux sélections nationales</h2>
+            <p>Les 48 équipes de la Coupe du monde 2026 disposent d’un XI et de sept remplaçants.</p>
           </div>
           <div className="engine-status">
             <span className="engine-status-dot" />
@@ -73,6 +94,9 @@ export function MatchSimulator() {
         </div>
 
         <div className="toolbar toolbar-v07">
+          <TeamSelect id="quick-home" label="Équipe à domicile" value={homeId} onChange={(value) => { setHomeId(value); setMatch(null); }} teams={teams} disabledValue={awayId} />
+          <TeamSelect id="quick-away" label="Équipe à l’extérieur" value={awayId} onChange={(value) => { setAwayId(value); setMatch(null); }} teams={teams} disabledValue={homeId} />
+
           <div className="field-group">
             <label htmlFor="seed">Seed déterministe</label>
             <input
@@ -85,7 +109,7 @@ export function MatchSimulator() {
 
           <ColorSelect
             id="home-color"
-            label="Votre équipe"
+            label="Couleur domicile"
             value={homeColor}
             onChange={setHomeColor}
             disabledValue={awayColor}
@@ -93,7 +117,7 @@ export function MatchSimulator() {
 
           <ColorSelect
             id="away-color"
-            label="Adversaire"
+            label="Couleur extérieur"
             value={awayColor}
             onChange={setAwayColor}
             disabledValue={homeColor}
@@ -104,7 +128,7 @@ export function MatchSimulator() {
             <input
               id="pitch-size"
               type="range"
-              min={400}
+              min={320}
               max={760}
               step={20}
               value={pitchMaxWidth}
@@ -116,7 +140,7 @@ export function MatchSimulator() {
             type="button"
             className="primary-button"
             onClick={runSimulation}
-            disabled={loading}
+            disabled={loading || !home || !away || homeId === awayId}
           >
             {loading ? "Simulation…" : "▶ Simuler le match"}
           </button>
@@ -139,12 +163,15 @@ export function MatchSimulator() {
         {error && <div className="error-box">{error}</div>}
 
         {match ? (
-          <PitchCanvas
-            replay={match.replay}
-            homeColor={homeColor}
-            awayColor={awayColor}
-            pitchMaxWidth={pitchMaxWidth}
-          />
+          <div ref={viewerRef}>
+            <PitchCanvas
+              replay={match.replay}
+              homeColor={homeColor}
+              awayColor={awayColor}
+              pitchMaxWidth={pitchMaxWidth}
+              fitViewport
+            />
+          </div>
         ) : (
           <div className="empty-state">
             <div>
@@ -263,6 +290,35 @@ export function MatchSimulator() {
         </div>
       )}
     </section>
+  );
+}
+
+function TeamSelect({
+  id,
+  label,
+  value,
+  onChange,
+  teams,
+  disabledValue,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  teams: SquadOpponent[];
+  disabledValue: string;
+}) {
+  return (
+    <div className="field-group quick-team-field">
+      <label htmlFor={id}>{label}</label>
+      <select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
+        {teams.map((team) => (
+          <option key={team.id} value={team.id} disabled={team.id === disabledValue}>
+            {team.flag} {team.name}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 

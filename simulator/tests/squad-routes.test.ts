@@ -40,12 +40,19 @@ describe("Squad Builder APIs", () => {
     const payload = (await response.json()) as Array<{
       id: string;
       nation: string;
+      flag: string;
+      syntheticPlayers: number;
       selection: typeof DEFAULT_HOME_SELECTION;
       players: Array<{ playerId: number; nationalityName: string }>;
     }>;
 
     expect(response.status).toBe(200);
-    expect(payload).toHaveLength(8);
+    expect(response.headers.get("Cache-Control")).toContain("no-store");
+    expect(response.headers.get("X-Team-Catalog-Size")).toBe("48");
+    expect(payload).toHaveLength(48);
+    expect(payload.map((team) => team.id)).toEqual(
+      expect.arrayContaining(["canada-2026", "france-2026", "turkiye-2026"]),
+    );
     for (const opponent of payload) {
       const ids = [
         ...Object.values(opponent.selection.starters),
@@ -55,6 +62,8 @@ describe("Squad Builder APIs", () => {
       expect(opponent.selection.bench).toHaveLength(7);
       expect(new Set(ids).size).toBe(18);
       expect(opponent.players).toHaveLength(18);
+      expect(opponent.flag.length).toBeGreaterThan(0);
+      expect(opponent.syntheticPlayers).toBeGreaterThanOrEqual(0);
       expect(
         opponent.players.every(
           (player) => player.nationalityName === opponent.nation,
@@ -64,7 +73,11 @@ describe("Squad Builder APIs", () => {
   });
 
   it("previews a valid squad and reuses the deterministic cache", async () => {
-    const body = JSON.stringify({ team: DEFAULT_HOME_SELECTION, runs: 10 });
+    const body = JSON.stringify({
+      team: DEFAULT_HOME_SELECTION,
+      runs: 10,
+      seedPrefix: "seed-choisie-par-joueur",
+    });
     const request = () => new Request("http://localhost/api/squad/preview", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -76,7 +89,7 @@ describe("Squad Builder APIs", () => {
       outcomes: { homeWinRate: number; drawRate: number; awayWinRate: number };
       home: { goals: number; possession: number; passCompletion: number };
       distributions: { homeGoals: { mean: number; p05: number; median: number; p95: number } };
-      players: Array<Record<string, unknown>>;
+      players: { home: Array<Record<string, unknown>>; away: Array<Record<string, unknown>> };
     };
     const second = await postPreview(request());
 
@@ -95,8 +108,9 @@ describe("Squad Builder APIs", () => {
     expect(payload.distributions.homeGoals.p05).toBeLessThanOrEqual(
       payload.distributions.homeGoals.p95,
     );
-    expect(payload.players).toHaveLength(16);
-    expect(payload.players[0]).toEqual(expect.objectContaining({
+    expect(payload.players.home).toHaveLength(16);
+    expect(payload.players.away).toHaveLength(18);
+    expect(payload.players.home[0]).toEqual(expect.objectContaining({
       playerName: expect.any(String),
       minutesPlayed: expect.any(Number),
       goals: expect.any(Number),

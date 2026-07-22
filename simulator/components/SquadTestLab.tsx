@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { positionShortLabel, roleLabel } from "@/lib/game/localization";
 import type {
   SquadOpponent,
   SquadPlayerAverage,
@@ -49,10 +50,12 @@ export function SquadTestLab() {
   const [opponents, setOpponents] = useState<SquadOpponent[]>([]);
   const [opponentId, setOpponentId] = useState("");
   const [runs, setRuns] = useState(30);
+  const [seedPrefix, setSeedPrefix] = useState("equipe-2026");
   const [result, setResult] = useState<SquadPreviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const reportRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,7 +63,7 @@ export function SquadTestLab() {
       try {
         const [loadedDraft, response] = await Promise.all([
           loadSquadDraft(),
-          fetch("/api/squad/opponents"),
+          fetch("/api/squad/opponents", { cache: "no-store" }),
         ]);
         const payload = (await response.json()) as SquadOpponent[] | { error: string };
         if (!response.ok || !Array.isArray(payload)) {
@@ -97,6 +100,7 @@ export function SquadTestLab() {
           team: toTeamSelection(draft),
           opponent: opponent.selection,
           runs,
+          seedPrefix,
         }),
       });
       const payload = (await response.json()) as SquadPreviewResponse | { error: string };
@@ -104,6 +108,7 @@ export function SquadTestLab() {
         throw new Error("error" in payload ? payload.error : "Tests impossibles.");
       }
       setResult(payload);
+      window.setTimeout(() => reportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Tests impossibles.");
     } finally {
@@ -121,8 +126,9 @@ export function SquadTestLab() {
           <h2>{draft?.name ?? "Équipe indisponible"}</h2>
           {!complete && <p className="squad-test-blocking">Le XI doit être complet avant de lancer les tests.</p>}
         </div>
-        <label>Adversaire<select value={opponentId} onChange={(event) => { setOpponentId(event.target.value); setResult(null); }}>{opponents.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label>Adversaire<select value={opponentId} onChange={(event) => { setOpponentId(event.target.value); setResult(null); }}>{opponents.map((item) => <option key={item.id} value={item.id}>{item.flag} {item.name}</option>)}</select></label>
         <label>Nombre de matchs<select value={runs} onChange={(event) => { setRuns(Number(event.target.value)); setResult(null); }}><option value={10}>10</option><option value={30}>30</option><option value={50}>50</option><option value={100}>100</option></select></label>
+        <label>Seed<input className="text-input" value={seedPrefix} maxLength={80} onChange={(event) => { setSeedPrefix(event.target.value); setResult(null); }} /></label>
         <button className="primary-button" type="button" disabled={!complete || !opponent || running} onClick={runTests}>{running ? `${runs} matchs en cours…` : "Lancer les tests"}</button>
         <Link className="control-button nav-link" href="/squad">Modifier l’équipe</Link>
       </section>
@@ -131,7 +137,7 @@ export function SquadTestLab() {
       {!result ? (
         <section className="card squad-test-empty"><h2>Rapport prêt à être généré</h2><p>Le rapport affichera les moyennes collectives et toutes les statistiques individuelles récupérées par le moteur.</p></section>
       ) : (
-        <SquadTestReport result={result} />
+        <div ref={reportRef}><SquadTestReport result={result} /></div>
       )}
     </div>
   );
@@ -167,8 +173,13 @@ function SquadTestReport({ result }: { result: SquadPreviewResponse }) {
       </section>
 
       <section className="card squad-test-section player-report-section">
-        <div className="squad-report-heading"><div><span className="config-kicker">TOUS LES JOUEURS</span><h2>Statistiques individuelles exhaustives</h2><p>Moyenne de chaque statistique par match sur {result.runs} simulations.</p></div></div>
-        <PlayerReportTable players={result.players} />
+        <div className="squad-report-heading"><div><span className="config-kicker">ÉQUIPE ANALYSÉE</span><h2>{result.teamName}</h2><p>Statistiques individuelles — moyenne de chaque valeur par match sur {result.runs} simulations.</p></div></div>
+        <PlayerReportTable players={result.players.home} />
+      </section>
+
+      <section className="card squad-test-section player-report-section">
+        <div className="squad-report-heading"><div><span className="config-kicker">ADVERSAIRE</span><h2>{result.opponentName}</h2><p>Statistiques individuelles — moyenne de chaque valeur par match sur {result.runs} simulations.</p></div></div>
+        <PlayerReportTable players={result.players.away} />
       </section>
     </div>
   );
@@ -181,7 +192,7 @@ function PlayerReportTable({ players }: { players: SquadPlayerAverage[] }) {
         <thead><tr><th>Joueur</th><th>N°</th><th>Poste</th><th>Rôle</th><th>Statut</th><th>Présence %</th><th>Minutes</th><th>Distance</th><th>Touches</th><th>Buts</th><th>Passes déc.</th><th>CSC</th><th>Tirs</th><th>Cadrés</th><th>Précision %</th><th>Passes</th><th>Réussies</th><th>Réussite %</th><th>Dribbles</th><th>Courses prog.</th><th>Tacles</th><th>Interceptions</th><th>Duels gagnés</th><th>Récupérations</th><th>Fautes</th><th>Jaunes</th><th>Rouges</th><th>Hors-jeu</th><th>Arrêts</th><th>Énergie début</th><th>Énergie fin</th></tr></thead>
         <tbody>{players.map((player) => (
           <tr key={player.playerId}>
-            <td>{player.playerName}</td><td>{player.shirtNumber}</td><td>{player.position ?? "—"}</td><td>{player.role}</td><td>{player.starter ? "Titulaire" : "Banc"}</td><td>{player.appearanceRate}</td><td>{player.minutesPlayed}</td><td>{player.distanceCovered}</td><td>{player.touches}</td><td>{player.goals}</td><td>{player.assists}</td><td>{player.ownGoals}</td><td>{player.shots}</td><td>{player.shotsOnTarget}</td><td>{player.shotAccuracy}</td><td>{player.passesAttempted}</td><td>{player.passesCompleted}</td><td>{player.passCompletion}</td><td>{player.dribbles}</td><td>{player.progressiveRuns}</td><td>{player.tackles}</td><td>{player.interceptions}</td><td>{player.duelsWon}</td><td>{player.possessionRegains}</td><td>{player.fouls}</td><td>{player.yellowCards}</td><td>{player.redCards}</td><td>{player.offsides}</td><td>{player.goalkeeperSaves}</td><td>{player.energyStart}</td><td>{player.energyEnd}</td>
+            <td>{player.playerName}</td><td>{player.shirtNumber}</td><td>{positionShortLabel(player.position)}</td><td>{roleLabel(player.role)}</td><td>{player.starter ? "Titulaire" : "Banc"}</td><td>{player.appearanceRate}</td><td>{player.minutesPlayed}</td><td>{player.distanceCovered}</td><td>{player.touches}</td><td>{player.goals}</td><td>{player.assists}</td><td>{player.ownGoals}</td><td>{player.shots}</td><td>{player.shotsOnTarget}</td><td>{player.shotAccuracy}</td><td>{player.passesAttempted}</td><td>{player.passesCompleted}</td><td>{player.passCompletion}</td><td>{player.dribbles}</td><td>{player.progressiveRuns}</td><td>{player.tackles}</td><td>{player.interceptions}</td><td>{player.duelsWon}</td><td>{player.possessionRegains}</td><td>{player.fouls}</td><td>{player.yellowCards}</td><td>{player.redCards}</td><td>{player.offsides}</td><td>{player.goalkeeperSaves}</td><td>{player.energyStart}</td><td>{player.energyEnd}</td>
           </tr>
         ))}</tbody>
       </table>
