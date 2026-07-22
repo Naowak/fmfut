@@ -68,6 +68,12 @@ export function tryPhysicalShotInterception(
           state.teams[shot.sourceTeamIndex].stats.shotsOnTarget += 1;
         }
         defendingTeam.stats.duelsWon += 1;
+        goalkeeper.matchStats.goalkeeperSaves += 1;
+        goalkeeper.matchStats.duelsWon += 1;
+        if (shot.actorId) {
+          const shooter = hooks.getPlayer(state, shot.actorId);
+          if (shooter) shooter.matchStats.shotsOnTarget += 1;
+        }
         const catchProbability = clamp(
           0.12 +
             0.52 * reachQuality +

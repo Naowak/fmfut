@@ -14,7 +14,9 @@
     "test:watch": "vitest",
     "test:dataset": "cd .. && python3 -m unittest discover -s dataset/tests -p 'test_*.py'",
     "test:all": "npm run typecheck && npm test && npm run test:dataset",
+    "test:calibration": "vitest run tests/calibration.test.ts tests/player-match-stats.test.ts tests/analytics-route.test.ts",
     "benchmark:data": "node --import tsx scripts/benchmark-data.ts",
+    "calibrate:match": "node --import tsx scripts/calibrate-match.ts",
     "package:data": "node --import tsx scripts/package-data.ts",
     "test:data-package": "node --import tsx scripts/test-data-package.ts"
   },

@@ -17,6 +17,7 @@ describe("POST /api/matches/simulate", () => {
     const payload = (await response.json()) as {
       contractVersion: string;
       result: { homeName: string; awayName: string };
+      playerStats: { home: unknown[]; away: unknown[] };
     };
     expect(response.status).toBe(200);
     expect(payload.contractVersion).toBe("1.0.0");
@@ -24,6 +25,9 @@ describe("POST /api/matches/simulate", () => {
       homeName: "Paris AI",
       awayName: "World XI",
     });
+    expect(payload.playerStats.home).toHaveLength(16);
+    expect(payload.playerStats.away).toHaveLength(16);
+    expect(payload.playerStats.home[0]).toHaveProperty("minutesPlayed");
   });
 
   it("returns 400 for malformed JSON", async () => {

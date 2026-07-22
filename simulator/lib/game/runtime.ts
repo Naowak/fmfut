@@ -12,6 +12,30 @@ import type {
   Vec2,
 } from "./types";
 
+export type RuntimePlayerMatchStats = {
+  logicalSecondsPlayed: number;
+  distanceCovered: number;
+  touches: number;
+  goals: number;
+  assists: number;
+  ownGoals: number;
+  shots: number;
+  shotsOnTarget: number;
+  passesAttempted: number;
+  passesCompleted: number;
+  dribbles: number;
+  progressiveRuns: number;
+  tackles: number;
+  interceptions: number;
+  duelsWon: number;
+  possessionRegains: number;
+  fouls: number;
+  yellowCards: number;
+  redCards: number;
+  offsides: number;
+  goalkeeperSaves: number;
+};
+
 export type TeamIndex = 0 | 1;
 
 export type RuntimePlayer = {
@@ -34,6 +58,7 @@ export type RuntimePlayer = {
   stunnedUntil: number;
   runTarget: Vec2 | null;
   runUntil: number;
+  matchStats: RuntimePlayerMatchStats;
 };
 
 export type RuntimeTeam = {
@@ -49,6 +74,11 @@ export type RuntimeTeam = {
   stats: Omit<TeamMatchStats, "possession" | "averageStarterEnergy"> & {
     possessionTicks: number;
   };
+  lastCompletedPass: {
+    passerId: string;
+    receiverId: string;
+    at: number;
+  } | null;
 };
 
 export type ControlledBall = {
@@ -90,6 +120,7 @@ export type LooseBall = {
   lastTouchTeamIndex?: TeamIndex;
   lastTouchPlayerId?: string;
   setPieceOrigin?: RestartType;
+  assistCandidateId?: string;
 };
 
 export type DeadBall = {
@@ -204,5 +235,31 @@ export function createEmptyStats(): RuntimeTeam["stats"] {
     goalkeeperSaves: 0,
     goalsFromSetPieces: 0,
     possessionTicks: 0,
+  };
+}
+
+export function createEmptyPlayerMatchStats(): RuntimePlayerMatchStats {
+  return {
+    logicalSecondsPlayed: 0,
+    distanceCovered: 0,
+    touches: 0,
+    goals: 0,
+    assists: 0,
+    ownGoals: 0,
+    shots: 0,
+    shotsOnTarget: 0,
+    passesAttempted: 0,
+    passesCompleted: 0,
+    dribbles: 0,
+    progressiveRuns: 0,
+    tackles: 0,
+    interceptions: 0,
+    duelsWon: 0,
+    possessionRegains: 0,
+    fouls: 0,
+    yellowCards: 0,
+    redCards: 0,
+    offsides: 0,
+    goalkeeperSaves: 0,
   };
 }

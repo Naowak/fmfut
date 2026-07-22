@@ -183,6 +183,41 @@ export interface TeamMatchStats {
   averageStarterEnergy: number;
 }
 
+export interface PlayerMatchStats {
+  runtimeId: string;
+  playerId: number;
+  playerName: string;
+  team: TeamSide;
+  starter: boolean;
+  shirtNumber: number;
+  position: Position | null;
+  role: Role;
+  minutesPlayed: number;
+  distanceCovered: number;
+  touches: number;
+  goals: number;
+  assists: number;
+  ownGoals: number;
+  shots: number;
+  shotsOnTarget: number;
+  passesAttempted: number;
+  passesCompleted: number;
+  passCompletion: number;
+  dribbles: number;
+  progressiveRuns: number;
+  tackles: number;
+  interceptions: number;
+  duelsWon: number;
+  possessionRegains: number;
+  fouls: number;
+  yellowCards: number;
+  redCards: number;
+  offsides: number;
+  goalkeeperSaves: number;
+  energyStart: number;
+  energyEnd: number;
+}
+
 export interface TeamSpatialAnalytics {
   samples: number;
   allPlayersHeatmap: number[];
@@ -236,6 +271,10 @@ export interface MatchSimulationOutput {
   stats: {
     home: TeamMatchStats;
     away: TeamMatchStats;
+  };
+  playerStats: {
+    home: PlayerMatchStats[];
+    away: PlayerMatchStats[];
   };
   notifications: {
     injuries: Array<{

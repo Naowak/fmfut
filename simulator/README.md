@@ -195,10 +195,26 @@ Le retour contient :
 {
   result,
   stats,
+  playerStats,
   notifications,
   replay
 }
 ```
+
+`playerStats` reste disponible en mode headless et contient les lignes
+individuelles complètes. La méthodologie, les unités et les commandes de test
+sont détaillées dans [CALIBRATION.md](./CALIBRATION.md).
+
+## Calibration Monte-Carlo
+
+```bash
+npm run test:calibration
+npm run calibrate:match -- 500 --compact
+```
+
+Le rapport vérifie les invariants de chaque match, les distributions, la
+symétrie des côtés, la stabilité entre familles de seeds, la sensibilité à la
+qualité du XI et les signatures statistiques par poste.
 
 ## Replay
 

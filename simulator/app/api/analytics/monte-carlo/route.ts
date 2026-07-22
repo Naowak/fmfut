@@ -9,6 +9,10 @@ import {
   type SpatialTeamAggregate,
 } from "@/lib/analytics/types";
 import { runMicroBenchmarks } from "@/lib/analytics/micro-benchmarks";
+import {
+  aggregatePlayerPerformance,
+  aggregatePositionPerformance,
+} from "@/lib/analytics/player-performance";
 import { simulateMatch } from "@/lib/game";
 import {
   assertSelectionPlayersExist,
@@ -17,6 +21,7 @@ import {
 } from "@/lib/game/sample-teams";
 import type {
   MatchSpatialAnalytics,
+  PlayerMatchStats,
   PlayerCard,
   Position,
   TeamMatchStats,
@@ -40,6 +45,7 @@ type MatchSummary = {
   firstHalfAddedTime: number;
   secondHalfAddedTime: number;
   spatial?: MatchSpatialAnalytics;
+  playerStats: { home: PlayerMatchStats[]; away: PlayerMatchStats[] };
 };
 
 export async function POST(request: Request) {
@@ -100,6 +106,12 @@ export async function POST(request: Request) {
       sensitivity,
       microBenchmarks,
       roleExperiment,
+      individual: aggregatePlayerPerformance(
+        baselineMatches.map((match) => match.playerStats),
+      ),
+      positions: aggregatePositionPerformance(
+        baselineMatches.map((match) => match.playerStats),
+      ),
       notes: [
         "Les simulations analytiques tournent avec recordReplay=false : aucun frame Canvas n'est généré.",
         "La baseline enregistre un échantillon spatial par seconde logique pour les heatmaps et les métriques de bloc.",
@@ -161,6 +173,7 @@ function runBatch(params: {
       firstHalfAddedTime: result.replay.addedTime.firstHalfMinutes,
       secondHalfAddedTime: result.replay.addedTime.secondHalfMinutes,
       spatial: result.analytics,
+      playerStats: result.playerStats,
     });
   }
 

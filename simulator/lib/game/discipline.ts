@@ -24,6 +24,7 @@ export function handleFoul(
   hooks: DisciplineHooks,
 ): void {
   state.teams[defender.teamIndex].stats.fouls += 1;
+  defender.matchStats.fouls += 1;
   hooks.emit(state, {
     type: "FOUL",
     team: defender.side,
@@ -58,6 +59,7 @@ function giveYellowCard(
 ): void {
   player.yellowCards += 1;
   state.teams[player.teamIndex].stats.yellowCards += 1;
+  player.matchStats.yellowCards += 1;
   hooks.emit(state, {
     type: "YELLOW_CARD",
     team: player.side,
@@ -80,6 +82,7 @@ function giveRedCard(
   player.redCard = true;
   player.active = false;
   state.teams[player.teamIndex].stats.redCards += 1;
+  player.matchStats.redCards += 1;
   hooks.emit(state, {
     type: "RED_CARD",
     team: player.side,

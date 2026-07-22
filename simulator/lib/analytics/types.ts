@@ -1,4 +1,4 @@
-import type { Position } from "@/lib/game/types";
+import type { Position, TeamSide } from "@/lib/game/types";
 
 export const ANALYZED_STATS = [
   "speed",
@@ -119,6 +119,58 @@ export interface RoleExperimentResult {
   delta: number;
 }
 
+export type SampleReliability = "LOW" | "MEDIUM" | "HIGH";
+
+export interface DecisionMetricsPer90 {
+  goals: number;
+  assists: number;
+  shots: number;
+  shotsOnTarget: number;
+  touches: number;
+  passesAttempted: number;
+  passesCompleted: number;
+  dribbles: number;
+  progressiveRuns: number;
+  tackles: number;
+  interceptions: number;
+  duelsWon: number;
+  possessionRegains: number;
+  fouls: number;
+  cards: number;
+  goalkeeperSaves: number;
+  distanceCovered: number;
+  attackingContributions: number;
+  progressionActions: number;
+  defensiveActions: number;
+}
+
+export interface PlayerDecisionProfile {
+  key: string;
+  playerId: number;
+  playerName: string;
+  team: TeamSide;
+  position: Position | null;
+  starts: number;
+  appearances: number;
+  sampledMinutes: number;
+  averageMinutes: number;
+  passCompletion: number;
+  shotAccuracy: number;
+  averageEnergyEnd: number;
+  disciplineRiskPer90: number;
+  reliability: SampleReliability;
+  per90: DecisionMetricsPer90;
+}
+
+export interface PositionDecisionProfile {
+  position: Position;
+  appearances: number;
+  sampledMinutes: number;
+  passCompletion: number;
+  shotAccuracy: number;
+  per90: DecisionMetricsPer90;
+}
+
 export interface MonteCarloResponse {
   seedPrefix: string;
   runs: number;
@@ -128,5 +180,60 @@ export interface MonteCarloResponse {
   sensitivity: SensitivityResult[];
   microBenchmarks: MicroBenchmarkResult[];
   roleExperiment: RoleExperimentResult | null;
+  individual: PlayerDecisionProfile[];
+  positions: PositionDecisionProfile[];
   notes: string[];
+}
+
+export interface DistributionSummary {
+  mean: number;
+  standardDeviation: number;
+  min: number;
+  p05: number;
+  median: number;
+  p95: number;
+  max: number;
+}
+
+export interface CalibrationReport {
+  runs: number;
+  seedPrefix: string;
+  invariantViolations: string[];
+  outcomes: {
+    homeWinRate: number;
+    drawRate: number;
+    awayWinRate: number;
+    averageGoalDifference: number;
+  };
+  distributions: {
+    totalGoals: DistributionSummary;
+    totalShots: DistributionSummary;
+    totalPasses: DistributionSummary;
+    totalFouls: DistributionSummary;
+    totalCards: DistributionSummary;
+    possessionDifference: DistributionSummary;
+  };
+  individual: PlayerDecisionProfile[];
+  positions: PositionDecisionProfile[];
+  checks: CalibrationCheck[];
+}
+
+export interface CalibrationCheck {
+  id: string;
+  label: string;
+  value: number;
+  minimum: number;
+  maximum: number;
+  passed: boolean;
+}
+
+export interface PairedExperimentResult {
+  runs: number;
+  averageBaselineGoalDifference: number;
+  averageVariantGoalDifference: number;
+  averageGoalDifferenceDelta: number;
+  deltaStandardError: number;
+  baselineWinRate: number;
+  variantWinRate: number;
+  winRateDelta: number;
 }
