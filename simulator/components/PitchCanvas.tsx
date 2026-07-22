@@ -14,13 +14,15 @@ type Props = {
   replay: MatchReplay;
   homeColor: string;
   awayColor: string;
+  homeBadge?: string;
+  awayBadge?: string;
   pitchMaxWidth: number;
   fitViewport?: boolean;
 };
 
 type InterpolatedPlayer = ReplayPlayerFrame;
 
-export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth, fitViewport = false }: Props) {
+export function PitchCanvas({ replay, homeColor, awayColor, homeBadge = "●", awayBadge = "●", pitchMaxWidth, fitViewport = false }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationRef = useRef<number | null>(null);
   const lastTimestampRef = useRef<number | null>(null);
@@ -179,7 +181,7 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth, fitVi
   const viewerStyle = {
     maxWidth: `${pitchMaxWidth}px`,
     width: fitViewport
-      ? `min(100%, clamp(280px, calc((100svh - 310px) * 0.7069), ${pitchMaxWidth}px))`
+      ? `min(100%, clamp(320px, calc((100svh - 185px) * 0.7069), ${pitchMaxWidth}px))`
       : "100%",
   };
 
@@ -211,24 +213,6 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth, fitVi
   return (
     <div className="match-view-grid">
       <div className="pitch-column">
-        <div
-          className="match-scoreboard"
-          style={viewerStyle}
-        >
-          <span className="score-team score-team-home">
-            <i className="score-team-dot" style={{ background: homeColor }} />
-            {replay.homeName}
-          </span>
-          <span className="score-value">
-            {liveScore.home} - {liveScore.away}
-          </span>
-          <span className="score-team score-team-away">
-            {replay.awayName}
-            <i className="score-team-dot" style={{ background: awayColor }} />
-          </span>
-          <span className="scoreboard-clock">{clockLabel}</span>
-        </div>
-
         <div
           className="pitch-stage pitch-stage-vertical"
           style={viewerStyle}
@@ -269,7 +253,13 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth, fitVi
           )}
         </div>
 
-        <div className="replay-controls replay-controls-v07">
+        <div className="replay-controls replay-controls-v07" style={viewerStyle}>
+          <div className="replay-scoreline">
+            <span className="score-team score-team-home"><i>{homeBadge}</i>{replay.homeName}</span>
+            <strong>{liveScore.home} – {liveScore.away}</strong>
+            <span className="score-team score-team-away">{replay.awayName}<i>{awayBadge}</i></span>
+            <time>{clockLabel}</time>
+          </div>
           <div className="transport-controls">
             <button
               type="button"
@@ -315,36 +305,11 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth, fitVi
             </div>
           </div>
 
-          <div className="seek-controls seek-controls-bidirectional" aria-label="Naviguer dans le replay">
-            <div className="seek-control-group">
-              <span className="seek-label">Reculer</span>
-              {[10, 5, 2, 1].map((seconds) => (
-                <button
-                  key={`back-${seconds}`}
-                  type="button"
-                  className="control-button seek-button"
-                  onClick={() => seekBy(-seconds)}
-                  disabled={time <= 0}
-                >
-                  -{seconds}s
-                </button>
-              ))}
-            </div>
-
-            <div className="seek-control-group">
-              <span className="seek-label">Avancer</span>
-              {[1, 2, 5, 10].map((seconds) => (
-                <button
-                  key={`forward-${seconds}`}
-                  type="button"
-                  className="control-button seek-button"
-                  onClick={() => seekBy(seconds)}
-                  disabled={time >= replay.logicalDuration}
-                >
-                  +{seconds}s
-                </button>
-              ))}
-            </div>
+          <div className="seek-controls replay-jumps" aria-label="Naviguer dans le replay">
+            <button type="button" className="control-button seek-button" title="Reculer de 10 secondes" aria-label="Reculer de 10 secondes" onClick={() => seekBy(-10)} disabled={time <= 0}>≪</button>
+            <button type="button" className="control-button seek-button" title="Reculer de 2 secondes" aria-label="Reculer de 2 secondes" onClick={() => seekBy(-2)} disabled={time <= 0}>‹</button>
+            <button type="button" className="control-button seek-button" title="Avancer de 2 secondes" aria-label="Avancer de 2 secondes" onClick={() => seekBy(2)} disabled={time >= replay.logicalDuration}>›</button>
+            <button type="button" className="control-button seek-button" title="Avancer de 10 secondes" aria-label="Avancer de 10 secondes" onClick={() => seekBy(10)} disabled={time >= replay.logicalDuration}>≫</button>
           </div>
 
           <div className="timeline-row">
@@ -360,32 +325,23 @@ export function PitchCanvas({ replay, homeColor, awayColor, pitchMaxWidth, fitVi
               aria-label="Position dans le replay"
             />
             <span className="replay-time-label">
-              {Math.round(time)}s / {replay.logicalDuration}s
+              {Math.round(time)}s / {Math.round(replay.logicalDuration)}s
             </span>
           </div>
         </div>
 
-        <div className="result-banner">
-          <span>Votre équipe est en bas et attaque vers le haut.</span>
-          <span>Seed : {replay.seed}</span>
-        </div>
       </div>
 
       <aside className="commentary-panel">
         <div className="commentary-header">
-          <div>
-            <span className="muted">Commentaires</span>
-            <h2>Fil du match</h2>
-          </div>
+          <h2>Fil du match</h2>
           <span className="commentary-minute">
             {clockLabel}
           </span>
         </div>
 
         <div className="commentary-list">
-          {commentaryEvents.length === 0 ? (
-            <p className="muted">Le match vient de commencer.</p>
-          ) : (
+          {commentaryEvents.length > 0 && (
             commentaryEvents.map((event, index) => (
               <EventLine
                 key={`${event.t}-${event.type}-${index}`}

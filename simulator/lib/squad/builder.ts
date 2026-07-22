@@ -115,6 +115,9 @@ export function assignPlayerToSlot(
     (candidate) => draft.starters[candidate]?.playerId === player.playerId,
   );
   const displaced = draft.starters[slotId];
+  const benchIndex = draft.bench.findIndex(
+    (candidate) => candidate.playerId === player.playerId,
+  );
   if (sourceSlot === slotId) return draft;
   if (sourceSlot && displaced) {
     return {
@@ -124,6 +127,15 @@ export function assignPlayerToSlot(
         [sourceSlot]: displaced,
         [slotId]: player,
       },
+    };
+  }
+  if (benchIndex >= 0 && displaced) {
+    const bench = [...draft.bench];
+    bench[benchIndex] = displaced;
+    return {
+      ...draft,
+      starters: { ...draft.starters, [slotId]: player },
+      bench,
     };
   }
   const cleaned = removePlayer(draft, player.playerId);

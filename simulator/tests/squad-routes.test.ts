@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { GET as getBenchmarks } from "../app/api/players/benchmarks/route";
 import { GET as getBootstrap } from "../app/api/squad/bootstrap/route";
 import { GET as getOpponents } from "../app/api/squad/opponents/route";
+import { GET as getRandomSquad } from "../app/api/squad/random/route";
 import { POST as postPreview } from "../app/api/squad/preview/route";
+import { positionCompatibility } from "../lib/game/compatibility";
+import { FORMATION_433 } from "../lib/game/formations";
 import { DEFAULT_HOME_SELECTION } from "../lib/game/sample-teams";
 
 describe("Squad Builder APIs", () => {
@@ -69,6 +72,29 @@ describe("Squad Builder APIs", () => {
           (player) => player.nationalityName === opponent.nation,
         ),
       ).toBe(true);
+    }
+  });
+
+  it("generates a deterministic random squad with valid positions", async () => {
+    const request = () => new Request("http://localhost/api/squad/random?seed=ui-v012");
+    const first = await getRandomSquad(request());
+    const second = await getRandomSquad(request());
+    const payload = (await first.json()) as {
+      selection: typeof DEFAULT_HOME_SELECTION;
+      players: Array<ReturnType<typeof import("../lib/data/load-players").loadPlayers>[number]>;
+    };
+    const repeated = (await second.json()) as typeof payload;
+    const byId = new Map(payload.players.map((player) => [player.playerId, player]));
+
+    expect(first.status).toBe(200);
+    expect(payload.selection).toEqual(repeated.selection);
+    expect(Object.keys(payload.selection.starters)).toHaveLength(11);
+    expect(payload.selection.bench).toHaveLength(7);
+    expect(payload.players).toHaveLength(18);
+    expect(new Set(payload.players.map((player) => player.playerId)).size).toBe(18);
+    for (const slot of FORMATION_433) {
+      const player = byId.get(payload.selection.starters[slot.id])!;
+      expect(positionCompatibility(player, slot.position)).toBeGreaterThanOrEqual(0.75);
     }
   });
 

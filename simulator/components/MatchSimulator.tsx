@@ -66,7 +66,7 @@ export function MatchSimulator() {
       }
 
       setMatch(payload);
-      window.setTimeout(() => viewerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+      window.setTimeout(() => scrollToPanel(viewerRef.current), 80);
     } catch (simulationError) {
       setError(
         simulationError instanceof Error
@@ -81,18 +81,6 @@ export function MatchSimulator() {
   return (
     <section className="simulator-shell">
       <div className="card main-card">
-        <div className="simulator-config-header">
-          <div>
-            <span className="config-kicker">PARTIE RAPIDE</span>
-            <h2>Choisis deux sélections nationales</h2>
-            <p>Les 48 équipes de la Coupe du monde 2026 disposent d’un XI et de sept remplaçants.</p>
-          </div>
-          <div className="engine-status">
-            <span className="engine-status-dot" />
-            Moteur déterministe · v0.7
-          </div>
-        </div>
-
         <div className="toolbar toolbar-v07">
           <TeamSelect id="quick-home" label="Équipe à domicile" value={homeId} onChange={(value) => { setHomeId(value); setMatch(null); }} teams={teams} disabledValue={awayId} />
           <TeamSelect id="quick-away" label="Équipe à l’extérieur" value={awayId} onChange={(value) => { setAwayId(value); setMatch(null); }} teams={teams} disabledValue={homeId} />
@@ -163,26 +151,18 @@ export function MatchSimulator() {
         {error && <div className="error-box">{error}</div>}
 
         {match ? (
-          <div ref={viewerRef}>
+          <div className="match-view-anchor" ref={viewerRef}>
             <PitchCanvas
               replay={match.replay}
               homeColor={homeColor}
               awayColor={awayColor}
+              homeBadge={home?.flag}
+              awayBadge={away?.flag}
               pitchMaxWidth={pitchMaxWidth}
               fitViewport
             />
           </div>
-        ) : (
-          <div className="empty-state">
-            <div>
-              <h2>Aucun match simulé</h2>
-              <p>
-                Lance une simulation. Le serveur calcule le match entier,
-                puis le viewer lit le replay reçu.
-              </p>
-            </div>
-          </div>
-        )}
+        ) : null}
       </div>
 
       {match && (
@@ -291,6 +271,11 @@ export function MatchSimulator() {
       )}
     </section>
   );
+}
+
+function scrollToPanel(element: HTMLElement | null) {
+  if (!element) return;
+  window.scrollTo(0, window.scrollY + element.getBoundingClientRect().top - 58);
 }
 
 function TeamSelect({

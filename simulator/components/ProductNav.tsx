@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 const SQUAD_LINKS = [
   { href: "/squad", label: "Équipes", exact: true },
@@ -15,6 +16,13 @@ const ENGINE_LINKS = [
 
 export function ProductNav() {
   const pathname = usePathname();
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  useEffect(() => {
+    const stored = window.localStorage.getItem("fmfut:theme");
+    const next = stored === "light" ? "light" : "dark";
+    setTheme(next);
+    document.documentElement.dataset.theme = next;
+  }, []);
   const link = ({ href, label, exact = false }: { href: string; label: string; exact?: boolean }) => {
     const active = exact ? pathname === href : pathname.startsWith(href);
     return (
@@ -26,14 +34,17 @@ export function ProductNav() {
 
   return (
     <nav className="product-nav" aria-label="Navigation principale">
+      <Link href="/squad" className="product-brand">FMFUT</Link>
       <div className="product-nav-group product-nav-squad" aria-label="Gestion d’équipe">
-        <span className="product-nav-label">MON ÉQUIPE</span>
         {SQUAD_LINKS.map(link)}
       </div>
       <div className="product-nav-group product-nav-engine" aria-label="Moteur et équilibrage">
-        <span className="product-nav-label">MOTEUR</span>
         {ENGINE_LINKS.map(link)}
       </div>
+      <button className="theme-toggle" type="button" aria-label={theme === "dark" ? "Activer le mode clair" : "Activer le mode sombre"} onClick={() => {
+        const next = theme === "dark" ? "light" : "dark";
+        setTheme(next); document.documentElement.dataset.theme = next; window.localStorage.setItem("fmfut:theme", next);
+      }}>{theme === "dark" ? "☀" : "☾"}</button>
     </nav>
   );
 }

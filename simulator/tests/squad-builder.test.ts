@@ -14,6 +14,13 @@ import {
   roleFitScore,
   toTeamSelection,
 } from "../lib/squad/builder";
+import {
+  activeWorkspaceDraft,
+  createSavedStrategy,
+  createSavedTeam,
+  parseWorkspace,
+  type SquadWorkspace,
+} from "../lib/squad/client-storage";
 
 const players = loadPlayers();
 const demoPlayers = players.filter((player) =>
@@ -54,6 +61,17 @@ describe("Squad Builder domain", () => {
 
     expect(swapped.starters.LW).toEqual(striker);
     expect(swapped.starters.ST).toEqual(leftWing);
+    expect(allDraftPlayers(swapped)).toHaveLength(allDraftPlayers(draft).length);
+  });
+
+  it("swaps a substitute with the selected starter", () => {
+    const draft = draftFromSelection(DEFAULT_HOME_SELECTION, demoPlayers);
+    const substitute = draft.bench[0];
+    const starter = draft.starters.ST!;
+    const swapped = assignPlayerToSlot(draft, "ST", substitute);
+
+    expect(swapped.starters.ST).toEqual(substitute);
+    expect(swapped.bench[0]).toEqual(starter);
     expect(allDraftPlayers(swapped)).toHaveLength(allDraftPlayers(draft).length);
   });
 
@@ -117,5 +135,28 @@ describe("Squad Builder domain", () => {
       (mbappe.stats.shooting + mbappe.stats.speed + mbappe.stats.technique) / 3,
     );
     expect(roleFitScore(mbappe, "OFFENSIVE")).toBe(expected);
+  });
+
+  it("stores several strategies for the same team", () => {
+    const primaryDraft = draftFromSelection(DEFAULT_HOME_SELECTION, demoPlayers);
+    const team = createSavedTeam(primaryDraft, "Principale");
+    const cautious = createSavedStrategy(
+      { ...primaryDraft, tactics: { blockHeight: "LOW", buildUp: "BALANCED" } },
+      "Prudente",
+    );
+    team.strategies.push(cautious);
+    const workspace: SquadWorkspace = {
+      version: 2,
+      activeTeamId: team.id,
+      activeStrategyId: cautious.id,
+      teams: [team],
+    };
+
+    const restored = parseWorkspace(JSON.stringify(workspace));
+    expect(restored.teams[0].strategies.map((strategy) => strategy.name)).toEqual([
+      "Principale",
+      "Prudente",
+    ]);
+    expect(activeWorkspaceDraft(restored)?.tactics.blockHeight).toBe("LOW");
   });
 });

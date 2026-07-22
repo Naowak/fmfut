@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FORMATION_433 } from "@/lib/game/formations";
 import {
   nationalityLabel,
@@ -21,18 +20,21 @@ import type {
 } from "@/lib/squad/api-types";
 import { estimatePercentile } from "@/lib/squad/benchmarks";
 import {
-  loadSquadDraft,
-  persistSquadDraft,
+  activeWorkspaceDraft,
+  createSavedStrategy,
+  createSavedTeam,
+  emptyWorkspace,
+  loadSquadWorkspace,
+  persistSquadWorkspace,
+  type SquadWorkspace,
 } from "@/lib/squad/client-storage";
 import {
   addPlayerToBench,
   allDraftPlayers,
   assignPlayerToSlot,
   createEmptyDraft,
-  createSnapshot,
   diagnoseSquad,
   draftFromSelection,
-  parseSnapshot,
   playerInDraft,
   removePlayer,
   roleFitScore,
@@ -44,6 +46,7 @@ const POSITIONS: Array<"" | Position> = [
   "", "GK", "LB", "CB", "RB", "CDM", "CM", "CAM", "LM", "RM", "LW", "RW", "ST",
 ];
 const ROLES: Role[] = ["DEFENSIVE", "NORMAL", "OFFENSIVE", "CREATOR", "PRESSING"];
+const TEAM_EMBLEMS = ["⚽", "🦁", "🐺", "🦅", "🐉", "🔥", "⚡", "⭐", "👑", "🏆", "🛡️", "🚀"];
 const STATS = ["speed", "shooting", "passing", "physical", "technique", "intelligence"] as const;
 const STAT_LABELS: Record<(typeof STATS)[number], string> = {
   speed: "VIT", shooting: "TIR", passing: "PAS", physical: "PHY", technique: "TEC", intelligence: "INT",
@@ -58,6 +61,8 @@ type SearchPayload = {
 
 export function SquadBuilder() {
   const [draft, setDraft] = useState<SquadDraft>(() => createEmptyDraft());
+  const [workspace, setWorkspace] = useState<SquadWorkspace>(() => emptyWorkspace());
+  const [hydrated, setHydrated] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<SquadSlotId>("ST");
   const [candidate, setCandidate] = useState<PlayerCard | null>(null);
   const [query, setQuery] = useState("");
@@ -70,7 +75,8 @@ export function SquadBuilder() {
   const [benchmarks, setBenchmarks] = useState<PositionBenchmarks[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<"SEARCH" | "TEAM" | "ANALYSIS">("TEAM");
-  const importRef = useRef<HTMLInputElement>(null);
+  const activeTeam = workspace.teams.find((team) => team.id === workspace.activeTeamId) ?? null;
+  const activeStrategy = activeTeam?.strategies.find((strategy) => strategy.id === workspace.activeStrategyId) ?? null;
 
   const diagnostics = useMemo(() => diagnoseSquad(draft), [draft]);
   const selectedPlayer = draft.starters[selectedSlot] ?? null;
@@ -83,10 +89,17 @@ export function SquadBuilder() {
     let cancelled = false;
     async function hydrate() {
       try {
-        const loaded = await loadSquadDraft();
-        if (!cancelled) setDraft(loaded);
+        const loaded = await loadSquadWorkspace();
+        if (!cancelled) {
+          setWorkspace(loaded);
+          setDraft(activeWorkspaceDraft(loaded) ?? createEmptyDraft());
+          setHydrated(true);
+        }
       } catch (error) {
-        if (!cancelled) setMessage(error instanceof Error ? error.message : "Chargement impossible.");
+        if (!cancelled) {
+          setMessage(error instanceof Error ? error.message : "Chargement impossible.");
+          setHydrated(true);
+        }
       }
     }
     void hydrate();
@@ -128,9 +141,78 @@ export function SquadBuilder() {
   function updateDraft(updater: (current: SquadDraft) => SquadDraft) {
     setDraft((current) => {
       const next = updater(current);
-      persistSquadDraft(next);
+      setWorkspace((currentWorkspace) => {
+        const nextWorkspace = {
+          ...currentWorkspace,
+          teams: currentWorkspace.teams.map((team) => team.id !== currentWorkspace.activeTeamId ? team : {
+            ...team,
+            name: next.name,
+            strategies: team.strategies.map((strategy) => strategy.id !== currentWorkspace.activeStrategyId
+              ? { ...strategy, draft: { ...strategy.draft, name: next.name } }
+              : { ...strategy, draft: next, updatedAt: new Date().toISOString() }),
+          }),
+        };
+        persistSquadWorkspace(nextWorkspace);
+        return nextWorkspace;
+      });
       return next;
     });
+  }
+
+  function activate(teamId: string, strategyId?: string) {
+    const team = workspace.teams.find((item) => item.id === teamId);
+    const strategy = team?.strategies.find((item) => item.id === strategyId) ?? team?.strategies[0];
+    if (!team || !strategy) return;
+    const next = { ...workspace, activeTeamId: team.id, activeStrategyId: strategy.id };
+    setWorkspace(next);
+    setDraft(strategy.draft);
+    persistSquadWorkspace(next);
+  }
+
+  function addTeam() {
+    const team = createSavedTeam(createEmptyDraft(`Équipe ${workspace.teams.length + 1}`));
+    const next = { ...workspace, activeTeamId: team.id, activeStrategyId: team.strategies[0].id, teams: [...workspace.teams, team] };
+    setWorkspace(next);
+    setDraft(team.strategies[0].draft);
+    persistSquadWorkspace(next);
+  }
+
+  function addStrategy() {
+    if (!activeTeam) return;
+    const strategy = createSavedStrategy(draft, `Stratégie ${activeTeam.strategies.length + 1}`);
+    const next = {
+      ...workspace,
+      activeStrategyId: strategy.id,
+      teams: workspace.teams.map((team) => team.id === activeTeam.id ? { ...team, strategies: [...team.strategies, strategy] } : team),
+    };
+    setWorkspace(next);
+    setDraft(strategy.draft);
+    persistSquadWorkspace(next);
+  }
+
+  function updateTeamEmblem(emblem: string) {
+    const next = {
+      ...workspace,
+      teams: workspace.teams.map((team) => team.id === activeTeam?.id ? { ...team, emblem } : team),
+    };
+    setWorkspace(next);
+    persistSquadWorkspace(next);
+  }
+
+  function deleteTeam() {
+    if (!activeTeam || !window.confirm(`Supprimer ${activeTeam.emblem} ${activeTeam.name} ?`)) return;
+    const teams = workspace.teams.filter((team) => team.id !== activeTeam.id);
+    const nextTeam = teams[0] ?? null;
+    const nextStrategy = nextTeam?.strategies[0] ?? null;
+    const next: SquadWorkspace = {
+      ...workspace,
+      teams,
+      activeTeamId: nextTeam?.id ?? null,
+      activeStrategyId: nextStrategy?.id ?? null,
+    };
+    setWorkspace(next);
+    setDraft(nextStrategy?.draft ?? createEmptyDraft());
+    persistSquadWorkspace(next);
   }
 
   function placeInSlot(player: PlayerCard, slotId = selectedSlot) {
@@ -159,44 +241,22 @@ export function SquadBuilder() {
     else placeInSlot(player, slotId);
   }
 
-  async function loadDemo() {
+  async function randomizeTeam() {
     try {
-      const response = await fetch("/api/squad/bootstrap");
+      const response = await fetch(`/api/squad/random?seed=${Date.now()}`, { cache: "no-store" });
       const payload = (await response.json()) as SquadBootstrapResponse | { error: string };
       if (!response.ok || "error" in payload) throw new Error("error" in payload ? payload.error : "Chargement impossible.");
-      const loaded = draftFromSelection(payload.selection, payload.players);
-      setDraft(loaded);
-      persistSquadDraft(loaded);
-      setMessage("Équipe de démonstration chargée.");
+      const loaded = { ...draftFromSelection(payload.selection, payload.players), name: activeTeam?.name ?? draft.name };
+      updateDraft(() => loaded);
+      setMessage("Équipe aléatoire créée.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Chargement impossible.");
     }
   }
 
-  function saveLocal() {
-    persistSquadDraft(draft);
-    setMessage("Composition sauvegardée sur cet appareil.");
-  }
-
-  function exportSquad() {
-    const blob = new Blob([JSON.stringify(createSnapshot(draft), null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${draft.name.trim().replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "mon-xi"}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-  }
-
-  async function importSquad(file: File) {
-    try {
-      const snapshot = parseSnapshot(await file.text());
-      setDraft(snapshot.draft);
-      persistSquadDraft(snapshot.draft);
-      setMessage("Composition importée.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Import impossible.");
-    }
+  if (!hydrated) return <div className="squad-inline-loading">Chargement…</div>;
+  if (!activeTeam || !activeStrategy) {
+    return <section className="empty-workspace"><h2>Aucune équipe</h2><p>Crée ta première équipe pour commencer.</p><button className="primary-button" type="button" onClick={addTeam}>Créer une équipe</button></section>;
   }
 
   return (
@@ -211,7 +271,7 @@ export function SquadBuilder() {
 
       <aside className="card squad-search-panel" data-mobile-active={mobileTab === "SEARCH"}>
         <div className="squad-panel-heading">
-          <div><span className="config-kicker">18 405 JOUEURS</span><h2>Explorer</h2></div>
+          <h2>Joueurs</h2>
           <span className="squad-count">{search.total.toLocaleString("fr-FR")}</span>
         </div>
         <div className="squad-search-filters">
@@ -247,17 +307,33 @@ export function SquadBuilder() {
 
       <main className="squad-team-column" data-mobile-active={mobileTab === "TEAM"}>
         <section className="card squad-team-toolbar">
-          <div className="squad-name-field">
-            <label htmlFor="squad-name">Nom de l’équipe</label>
-            <input id="squad-name" value={draft.name} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} />
+          <div className="workspace-switchers">
+            <div className="editable-entity editable-team">
+              <select className="emblem-picker" aria-label="Emblème de l’équipe" value={activeTeam.emblem} onChange={(event) => updateTeamEmblem(event.target.value)}>
+                {TEAM_EMBLEMS.map((emblem) => <option key={emblem} value={emblem}>{emblem}</option>)}
+              </select>
+              <input aria-label="Nom de l’équipe" value={draft.name} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} />
+              <select className="entity-menu" aria-label="Changer d’équipe" title="Changer d’équipe" value={activeTeam.id} onChange={(event) => activate(event.target.value)}>
+                {workspace.teams.map((team) => <option key={team.id} value={team.id}>{team.emblem} {team.name}</option>)}
+              </select>
+              <button type="button" aria-label="Créer une équipe" title="Créer une équipe" onClick={addTeam}>＋</button>
+            </div>
+            <div className="editable-entity editable-strategy">
+              <span aria-hidden="true">⌁</span>
+              <input aria-label="Nom de la stratégie" value={activeStrategy.name} onChange={(event) => {
+              const name = event.target.value;
+              const next = { ...workspace, teams: workspace.teams.map((team) => team.id === activeTeam.id ? { ...team, strategies: team.strategies.map((strategy) => strategy.id === activeStrategy.id ? { ...strategy, name } : strategy) } : team) };
+              setWorkspace(next); persistSquadWorkspace(next);
+              }} />
+              <select className="entity-menu" aria-label="Changer de stratégie" title="Changer de stratégie" value={activeStrategy.id} onChange={(event) => activate(activeTeam.id, event.target.value)}>
+                {activeTeam.strategies.map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.name}</option>)}
+              </select>
+              <button type="button" aria-label="Créer une stratégie" title="Créer une stratégie" onClick={addStrategy}>＋</button>
+            </div>
           </div>
           <div className="squad-toolbar-actions">
-            <button type="button" onClick={loadDemo}>Équipe démo</button>
-            <button type="button" onClick={() => updateDraft(() => createEmptyDraft())}>Vider</button>
-            <button type="button" onClick={saveLocal}>Sauvegarder</button>
-            <button type="button" onClick={exportSquad}>Exporter</button>
-            <button type="button" onClick={() => importRef.current?.click()}>Importer</button>
-            <input ref={importRef} type="file" accept="application/json" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void importSquad(file); event.target.value = ""; }} />
+            <button type="button" aria-label="Créer une équipe aléatoire" title="Équipe aléatoire" onClick={randomizeTeam}>🎲</button>
+            <button className="danger-button" type="button" aria-label="Supprimer l’équipe" title="Supprimer l’équipe" onClick={deleteTeam}>🗑</button>
           </div>
         </section>
 
@@ -312,14 +388,21 @@ export function SquadBuilder() {
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => { event.preventDefault(); handleDrop("BENCH", Number(event.dataTransfer.getData("text/player-id"))); }}
         >
-          <div className="squad-section-title"><div><span className="config-kicker">REMPLAÇANTS</span><h2>Banc</h2></div><span>{draft.bench.length}/7</span></div>
+          <div className="squad-section-title"><h2>Banc</h2><span>{draft.bench.length}/7</span></div>
           <div className="bench-list">
             {Array.from({ length: 7 }, (_, index) => {
               const player = draft.bench[index];
               return player ? (
-                <div className="bench-player" key={player.playerId} draggable onDragStart={(event) => event.dataTransfer.setData("text/player-id", String(player.playerId))}>
-                  <span className="player-overall">{player.overall}</span><div><strong>{player.shortName}</strong><span>{positionShortLabel(player.primaryPosition)} · {nationalityLabel(player.nationalityName)}</span></div>
-                  <button type="button" onClick={() => updateDraft((current) => removePlayer(current, player.playerId))}>×</button>
+                <div
+                  className="bench-player"
+                  key={player.playerId}
+                  draggable
+                  onDragStart={(event) => event.dataTransfer.setData("text/player-id", String(player.playerId))}
+                >
+                  <button className="bench-player-main" type="button" aria-label={`Placer ${player.shortName} en ${slotLabel(selectedSlot)}`} onClick={() => placeInSlot(player)}>
+                    <span className="player-overall">{player.overall}</span><span className="bench-player-identity"><strong>{player.shortName}</strong><span>{positionShortLabel(player.primaryPosition)} · {nationalityLabel(player.nationalityName)}</span></span>
+                  </button>
+                  <button type="button" aria-label={`Retirer ${player.shortName}`} onClick={() => updateDraft((current) => removePlayer(current, player.playerId))}>×</button>
                 </div>
               ) : (
                 <div className="bench-player bench-player-empty" key={`empty-${index}`}>
@@ -333,7 +416,7 @@ export function SquadBuilder() {
 
       <aside className="squad-analysis-column" data-mobile-active={mobileTab === "ANALYSIS"}>
         <section className="card squad-diagnostic-card">
-          <div className="squad-section-title"><div><span className="config-kicker">DIAGNOSTIC</span><h2>Équilibre du XI</h2></div><strong>{diagnostics.filledSlots}/11</strong></div>
+          <div className="squad-section-title"><h2>Équilibre du XI</h2><strong>{diagnostics.filledSlots}/11</strong></div>
           <div className="diagnostic-summary">
             <Metric label="Compatibilité" value={`${diagnostics.averageCompatibility}%`} />
             <Metric label="Liens synergie" value={diagnostics.synergyLinks} />
@@ -360,13 +443,7 @@ export function SquadBuilder() {
           <label>Construction<select value={draft.tactics.buildUp} onChange={(event) => updateDraft((current) => ({ ...current, tactics: { ...current.tactics, buildUp: event.target.value as SquadDraft["tactics"]["buildUp"] } }))}><option value="SHORT">Courte</option><option value="BALANCED">Équilibrée</option><option value="DIRECT">Directe</option></select></label>
         </section>
 
-        <ComparisonPanel current={selectedPlayer} candidate={candidate} position={selectedFormationSlot.position} benchmark={selectedBenchmark} role={draft.roles[selectedSlot] ?? "NORMAL"} />
-
-        <section className="card squad-actions-card">
-          <Link className="control-button nav-link" href="/squad/tests">Tester l’équipe</Link>
-          <Link className="primary-button nav-link" href="/squad/match">Lancer un match</Link>
-          <p>Les matchs et les tests disposent maintenant de leurs propres écrans.</p>
-        </section>
+        {candidate && <ComparisonPanel current={selectedPlayer} candidate={candidate} position={selectedFormationSlot.position} benchmark={selectedBenchmark} role={draft.roles[selectedSlot] ?? "NORMAL"} />}
       </aside>
     </div>
   );

@@ -10,7 +10,7 @@ import type {
   SquadTeamAverage,
 } from "@/lib/squad/api-types";
 import { diagnoseSquad, toTeamSelection, type SquadDraft } from "@/lib/squad/builder";
-import { loadSquadDraft } from "@/lib/squad/client-storage";
+import { emptyWorkspace, loadSquadWorkspace, type SquadWorkspace } from "@/lib/squad/client-storage";
 
 const TEAM_METRICS: Array<{ key: keyof SquadTeamAverage; label: string; suffix?: string }> = [
   { key: "goals", label: "Buts" },
@@ -46,7 +46,9 @@ const TEAM_METRICS: Array<{ key: keyof SquadTeamAverage; label: string; suffix?:
 ];
 
 export function SquadTestLab() {
-  const [draft, setDraft] = useState<SquadDraft | null>(null);
+  const [workspace, setWorkspace] = useState<SquadWorkspace>(() => emptyWorkspace());
+  const [teamId, setTeamId] = useState("");
+  const [strategyId, setStrategyId] = useState("");
   const [opponents, setOpponents] = useState<SquadOpponent[]>([]);
   const [opponentId, setOpponentId] = useState("");
   const [runs, setRuns] = useState(30);
@@ -61,8 +63,8 @@ export function SquadTestLab() {
     let cancelled = false;
     async function hydrate() {
       try {
-        const [loadedDraft, response] = await Promise.all([
-          loadSquadDraft(),
+        const [loadedWorkspace, response] = await Promise.all([
+          loadSquadWorkspace(),
           fetch("/api/squad/opponents", { cache: "no-store" }),
         ]);
         const payload = (await response.json()) as SquadOpponent[] | { error: string };
@@ -70,7 +72,11 @@ export function SquadTestLab() {
           throw new Error(!Array.isArray(payload) && "error" in payload ? payload.error : "Adversaires indisponibles.");
         }
         if (!cancelled) {
-          setDraft(loadedDraft);
+          setWorkspace(loadedWorkspace);
+          const team = loadedWorkspace.teams.find((item) => item.id === loadedWorkspace.activeTeamId) ?? loadedWorkspace.teams[0];
+          const strategy = team?.strategies.find((item) => item.id === loadedWorkspace.activeStrategyId) ?? team?.strategies[0];
+          setTeamId(team?.id ?? "");
+          setStrategyId(strategy?.id ?? "");
           setOpponents(payload);
           setOpponentId(payload[0]?.id ?? "");
         }
@@ -85,6 +91,9 @@ export function SquadTestLab() {
   }, []);
 
   const opponent = opponents.find((item) => item.id === opponentId) ?? null;
+  const selectedTeam = workspace.teams.find((item) => item.id === teamId) ?? null;
+  const selectedStrategy = selectedTeam?.strategies.find((item) => item.id === strategyId) ?? null;
+  const draft: SquadDraft | null = selectedStrategy?.draft ?? null;
   const complete = useMemo(() => draft ? diagnoseSquad(draft).complete : false, [draft]);
 
   async function runTests() {
@@ -108,7 +117,7 @@ export function SquadTestLab() {
         throw new Error("error" in payload ? payload.error : "Tests impossibles.");
       }
       setResult(payload);
-      window.setTimeout(() => reportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+      window.setTimeout(() => scrollToPanel(reportRef.current), 80);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Tests impossibles.");
     } finally {
@@ -117,30 +126,33 @@ export function SquadTestLab() {
   }
 
   if (loading) return <section className="card squad-screen-loading">Chargement du laboratoire…</section>;
+  if (workspace.teams.length === 0) return (
+    <section className="empty-workspace"><h2>Aucune équipe disponible</h2><p>Crée une équipe avant de lancer le simulateur.</p><Link className="primary-button nav-link" href="/squad">Créer une équipe</Link></section>
+  );
 
   return (
     <div className="squad-test-screen">
       <section className="card squad-test-controls">
-        <div>
-          <span className="config-kicker">COMPOSITION ANALYSÉE</span>
-          <h2>{draft?.name ?? "Équipe indisponible"}</h2>
-          {!complete && <p className="squad-test-blocking">Le XI doit être complet avant de lancer les tests.</p>}
-        </div>
+        <label>Équipe<select value={teamId} onChange={(event) => { const team = workspace.teams.find((item) => item.id === event.target.value); setTeamId(event.target.value); setStrategyId(team?.strategies[0]?.id ?? ""); setResult(null); }}>{workspace.teams.map((team) => <option key={team.id} value={team.id}>{team.emblem} {team.name}</option>)}</select></label>
+        <label>Stratégie<select value={strategyId} onChange={(event) => { setStrategyId(event.target.value); setResult(null); }}>{selectedTeam?.strategies.map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.name}</option>)}</select></label>
         <label>Adversaire<select value={opponentId} onChange={(event) => { setOpponentId(event.target.value); setResult(null); }}>{opponents.map((item) => <option key={item.id} value={item.id}>{item.flag} {item.name}</option>)}</select></label>
         <label>Nombre de matchs<select value={runs} onChange={(event) => { setRuns(Number(event.target.value)); setResult(null); }}><option value={10}>10</option><option value={30}>30</option><option value={50}>50</option><option value={100}>100</option></select></label>
         <label>Seed<input className="text-input" value={seedPrefix} maxLength={80} onChange={(event) => { setSeedPrefix(event.target.value); setResult(null); }} /></label>
         <button className="primary-button" type="button" disabled={!complete || !opponent || running} onClick={runTests}>{running ? `${runs} matchs en cours…` : "Lancer les tests"}</button>
-        <Link className="control-button nav-link" href="/squad">Modifier l’équipe</Link>
+        {!complete && <span className="squad-test-blocking">XI incomplet</span>}
       </section>
 
       {error && <div className="error-box">{error}</div>}
-      {!result ? (
-        <section className="card squad-test-empty"><h2>Rapport prêt à être généré</h2><p>Le rapport affichera les moyennes collectives et toutes les statistiques individuelles récupérées par le moteur.</p></section>
-      ) : (
-        <div ref={reportRef}><SquadTestReport result={result} /></div>
+      {result && (
+        <div className="squad-test-report-anchor" ref={reportRef}><SquadTestReport result={result} /></div>
       )}
     </div>
   );
+}
+
+function scrollToPanel(element: HTMLElement | null) {
+  if (!element) return;
+  window.scrollTo(0, window.scrollY + element.getBoundingClientRect().top - 58);
 }
 
 function SquadTestReport({ result }: { result: SquadPreviewResponse }) {

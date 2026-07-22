@@ -82,7 +82,7 @@ export function AnalyticsDashboard() {
       }
 
       setData(payload);
-      window.setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+      window.setTimeout(() => scrollToPanel(resultsRef.current), 80);
     } catch (analysisError) {
       setError(
         analysisError instanceof Error
@@ -155,17 +155,7 @@ export function AnalyticsDashboard() {
 
       {error && <div className="error-box">{error}</div>}
 
-      {!data ? (
-        <section className="card empty-state analytics-empty">
-          <div>
-            <h2>Runner headless prêt</h2>
-            <p>
-              La baseline collecte aussi les positions moyennes pour analyser
-              les blocs et produire des heatmaps.
-            </p>
-          </div>
-        </section>
-      ) : (
+      {data && (
         <div ref={resultsRef} className="analytics-results">
           <section className="analytics-kpis">
             <Kpi label="Buts / match" value={data.baseline.averageTotalGoals} />
@@ -217,12 +207,7 @@ export function AnalyticsDashboard() {
           {data.spatial && selectedSpatialTeam && (
             <section className="card analytics-section">
               <div className="analytics-section-header">
-                <div>
-                  <h2>Analyse spatiale</h2>
-                  <p className="muted">
-                    Repère équipe : notre but en bas, attaque vers le haut.
-                  </p>
-                </div>
+                <h2>Analyse spatiale</h2>
                 <div className="heatmap-controls">
                   <select
                     value={heatmapTeam}
@@ -273,9 +258,6 @@ export function AnalyticsDashboard() {
           {data.sensitivity.length > 0 && (
             <section className="card analytics-section">
               <h2>Sensibilité des six statistiques</h2>
-              <p className="muted">
-                Même série de seeds, avec +10 sur une seule stat du onze domicile. Le ± correspond à l'erreur standard du delta apparié. Un badge « bruité » signifie que l'intervalle approximatif à 95 % contient encore zéro : on ne retouche pas une stat sur ce seul signal global.
-              </p>
               <div className="sensitivity-list">
                 {[...data.sensitivity]
                   .sort((a, b) => b.averageGoalDifferenceDelta - a.averageGoalDifferenceDelta)
@@ -296,12 +278,7 @@ export function AnalyticsDashboard() {
           {data.microBenchmarks.length > 0 && (
             <section className="card analytics-section">
               <div className="analytics-section-header">
-                <div>
-                  <h2>Micro-benchmarks isolés</h2>
-                  <p className="muted">
-                    10 000 situations contrôlées par stat. Ici, un +10 doit améliorer directement la capacité testée, sans divergence chaotique d'un match complet.
-                  </p>
-                </div>
+                <h2>Micro-benchmarks isolés</h2>
               </div>
               <div className="micro-benchmark-grid">
                 {data.microBenchmarks.map((benchmark) => (
@@ -333,16 +310,15 @@ export function AnalyticsDashboard() {
             </section>
           )}
 
-          <section className="card analytics-section">
-            <h2>Notes</h2>
-            {data.notes.map((note) => (
-              <p key={note} className="muted">{note}</p>
-            ))}
-          </section>
         </div>
       )}
     </div>
   );
+}
+
+function scrollToPanel(element: HTMLElement | null) {
+  if (!element) return;
+  window.scrollTo(0, window.scrollY + element.getBoundingClientRect().top - 58);
 }
 
 function TeamSelect({ id, label, value, onChange, teams, disabledValue }: {
