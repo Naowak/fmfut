@@ -1,10 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PitchCanvas } from "./PitchCanvas";
 import { FORMATION_433 } from "@/lib/game/formations";
 import type {
-  MatchSimulationOutput,
   PlayerCard,
   Position,
   Role,
@@ -12,9 +11,12 @@ import type {
 import type {
   PositionBenchmarks,
   SquadBootstrapResponse,
-  SquadPreviewResponse,
 } from "@/lib/squad/api-types";
 import { estimatePercentile } from "@/lib/squad/benchmarks";
+import {
+  loadSquadDraft,
+  persistSquadDraft,
+} from "@/lib/squad/client-storage";
 import {
   addPlayerToBench,
   allDraftPlayers,
@@ -27,13 +29,10 @@ import {
   playerInDraft,
   removePlayer,
   roleFitScore,
-  SQUAD_SLOT_IDS,
-  toTeamSelection,
   type SquadDraft,
   type SquadSlotId,
 } from "@/lib/squad/builder";
 
-const STORAGE_KEY = "fmfut:squad-builder:v1";
 const POSITIONS: Array<"" | Position> = [
   "", "GK", "LB", "CB", "RB", "CDM", "CM", "CAM", "LM", "RM", "LW", "RW", "ST",
 ];
@@ -63,10 +62,6 @@ export function SquadBuilder() {
   const [searchLoading, setSearchLoading] = useState(true);
   const [benchmarks, setBenchmarks] = useState<PositionBenchmarks[]>([]);
   const [message, setMessage] = useState<string | null>(null);
-  const [preview, setPreview] = useState<SquadPreviewResponse | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [match, setMatch] = useState<MatchSimulationOutput | null>(null);
-  const [matchLoading, setMatchLoading] = useState(false);
   const [mobileTab, setMobileTab] = useState<"SEARCH" | "TEAM" | "ANALYSIS">("TEAM");
   const importRef = useRef<HTMLInputElement>(null);
 
@@ -81,16 +76,8 @@ export function SquadBuilder() {
     let cancelled = false;
     async function hydrate() {
       try {
-        const stored = window.localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          const snapshot = parseSnapshot(stored);
-          if (!cancelled) setDraft(snapshot.draft);
-        } else {
-          const response = await fetch("/api/squad/bootstrap");
-          const payload = (await response.json()) as SquadBootstrapResponse | { error: string };
-          if (!response.ok || "error" in payload) throw new Error("error" in payload ? payload.error : "Chargement impossible.");
-          if (!cancelled) setDraft(draftFromSelection(payload.selection, payload.players));
-        }
+        const loaded = await loadSquadDraft();
+        if (!cancelled) setDraft(loaded);
       } catch (error) {
         if (!cancelled) setMessage(error instanceof Error ? error.message : "Chargement impossible.");
       }
@@ -132,9 +119,11 @@ export function SquadBuilder() {
   }, [query, position, nation, minOverall, page]);
 
   function updateDraft(updater: (current: SquadDraft) => SquadDraft) {
-    setDraft((current) => updater(current));
-    setPreview(null);
-    setMatch(null);
+    setDraft((current) => {
+      const next = updater(current);
+      persistSquadDraft(next);
+      return next;
+    });
   }
 
   function placeInSlot(player: PlayerCard, slotId = selectedSlot) {
@@ -149,7 +138,7 @@ export function SquadBuilder() {
       (candidate) => candidate.playerId === player.playerId,
     );
     if (draft.bench.length >= 7 && !alreadyOnBench) {
-      setMessage("Le banc V1 est limité à 7 joueurs.");
+      setMessage("Le banc est limité à 7 joueurs.");
       return;
     }
     updateDraft((current) => addPlayerToBench(current, player));
@@ -168,17 +157,17 @@ export function SquadBuilder() {
       const response = await fetch("/api/squad/bootstrap");
       const payload = (await response.json()) as SquadBootstrapResponse | { error: string };
       if (!response.ok || "error" in payload) throw new Error("error" in payload ? payload.error : "Chargement impossible.");
-      setDraft(draftFromSelection(payload.selection, payload.players));
+      const loaded = draftFromSelection(payload.selection, payload.players);
+      setDraft(loaded);
+      persistSquadDraft(loaded);
       setMessage("Équipe de démonstration chargée.");
-      setPreview(null);
-      setMatch(null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Chargement impossible.");
     }
   }
 
   function saveLocal() {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(createSnapshot(draft)));
+    persistSquadDraft(draft);
     setMessage("Composition sauvegardée sur cet appareil.");
   }
 
@@ -196,55 +185,10 @@ export function SquadBuilder() {
     try {
       const snapshot = parseSnapshot(await file.text());
       setDraft(snapshot.draft);
+      persistSquadDraft(snapshot.draft);
       setMessage("Composition importée.");
-      setPreview(null);
-      setMatch(null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Import impossible.");
-    }
-  }
-
-  async function runPreview() {
-    setPreviewLoading(true);
-    setMessage(null);
-    try {
-      const team = toTeamSelection(draft);
-      const response = await fetch("/api/squad/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ team, runs: 30 }),
-      });
-      const payload = (await response.json()) as SquadPreviewResponse | { error: string };
-      if (!response.ok || "error" in payload) throw new Error("error" in payload ? payload.error : "Aperçu impossible.");
-      setPreview(payload);
-      setMobileTab("ANALYSIS");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Aperçu impossible.");
-    } finally {
-      setPreviewLoading(false);
-    }
-  }
-
-  async function launchMatch() {
-    setMatchLoading(true);
-    setMessage(null);
-    try {
-      const response = await fetch("/api/matches/simulate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          home: toTeamSelection(draft),
-          seed: `squad-v1-${Date.now()}`,
-        }),
-      });
-      const payload = (await response.json()) as MatchSimulationOutput | { error: string };
-      if (!response.ok || "error" in payload) throw new Error("error" in payload ? payload.error : "Match impossible.");
-      setMatch(payload);
-      window.setTimeout(() => document.getElementById("squad-match")?.scrollIntoView({ behavior: "smooth" }), 0);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Match impossible.");
-    } finally {
-      setMatchLoading(false);
     }
   }
 
@@ -335,7 +279,6 @@ export function SquadBuilder() {
                   onDragStart={(event) => player && event.dataTransfer.setData("text/player-id", String(player.playerId))}
                   onClick={() => {
                     setSelectedSlot(slotId);
-                    if (candidate) placeInSlot(candidate, slotId);
                   }}
                   aria-label={player ? `${slotId}, ${player.shortName}` : `${slotId}, vide`}
                 >
@@ -364,13 +307,19 @@ export function SquadBuilder() {
         >
           <div className="squad-section-title"><div><span className="config-kicker">REMPLAÇANTS</span><h2>Banc</h2></div><span>{draft.bench.length}/7</span></div>
           <div className="bench-list">
-            {draft.bench.length === 0 && <p className="muted">Dépose un joueur ici ou utilise « Banc ».</p>}
-            {draft.bench.map((player) => (
-              <div className="bench-player" key={player.playerId} draggable onDragStart={(event) => event.dataTransfer.setData("text/player-id", String(player.playerId))}>
-                <span className="player-overall">{player.overall}</span><div><strong>{player.shortName}</strong><span>{player.primaryPosition} · {player.nationalityName}</span></div>
-                <button type="button" onClick={() => updateDraft((current) => removePlayer(current, player.playerId))}>×</button>
-              </div>
-            ))}
+            {Array.from({ length: 7 }, (_, index) => {
+              const player = draft.bench[index];
+              return player ? (
+                <div className="bench-player" key={player.playerId} draggable onDragStart={(event) => event.dataTransfer.setData("text/player-id", String(player.playerId))}>
+                  <span className="player-overall">{player.overall}</span><div><strong>{player.shortName}</strong><span>{player.primaryPosition} · {player.nationalityName}</span></div>
+                  <button type="button" onClick={() => updateDraft((current) => removePlayer(current, player.playerId))}>×</button>
+                </div>
+              ) : (
+                <div className="bench-player bench-player-empty" key={`empty-${index}`}>
+                  <span>{index + 1}</span><strong>Emplacement libre</strong>
+                </div>
+              );
+            })}
           </div>
         </section>
       </main>
@@ -407,20 +356,11 @@ export function SquadBuilder() {
         <ComparisonPanel current={selectedPlayer} candidate={candidate} position={selectedFormationSlot.position} benchmark={selectedBenchmark} role={draft.roles[selectedSlot] ?? "NORMAL"} />
 
         <section className="card squad-actions-card">
-          <button className="control-button" type="button" disabled={!diagnostics.complete || previewLoading} onClick={runPreview}>{previewLoading ? "30 simulations…" : "Aperçu Monte-Carlo"}</button>
-          <button className="primary-button" type="button" disabled={!diagnostics.complete || matchLoading} onClick={launchMatch}>{matchLoading ? "Calcul du match…" : "Lancer le match"}</button>
-          <p>Les projections utilisent les mêmes seeds pour comparer les compositions. Elles restent indicatives.</p>
+          <Link className="control-button nav-link" href="/squad/tests">Tester l’équipe</Link>
+          <Link className="primary-button nav-link" href="/squad/match">Lancer un match</Link>
+          <p>Les matchs et les tests disposent maintenant de leurs propres écrans.</p>
         </section>
-
-        {preview && <PreviewPanel preview={preview} />}
       </aside>
-
-      {match && (
-        <section className="card squad-match-result" id="squad-match">
-          <div className="squad-section-title"><div><span className="config-kicker">MATCH TERMINÉ</span><h2>{match.result.homeName} {match.result.homeScore} — {match.result.awayScore} {match.result.awayName}</h2></div></div>
-          <PitchCanvas replay={match.replay} homeColor="#22c55e" awayColor="#ef4444" pitchMaxWidth={620} />
-        </section>
-      )}
     </div>
   );
 }
@@ -454,20 +394,6 @@ function ComparisonPanel({ current, candidate, position, benchmark, role }: {
         </div>
       )}
       {current && <p className="comparison-current">Titulaire actuel : <strong>{current.shortName}</strong> ({current.overall})</p>}
-    </section>
-  );
-}
-
-function PreviewPanel({ preview }: { preview: SquadPreviewResponse }) {
-  return (
-    <section className="card squad-preview-card">
-      <div className="squad-section-title"><div><span className="config-kicker">{preview.runs} MATCHS · {preview.reliability}</span><h2>Projection</h2></div></div>
-      <div className="preview-outcomes"><Metric label="Victoire" value={`${preview.outcomes.homeWinRate}%`} /><Metric label="Nul" value={`${preview.outcomes.drawRate}%`} /><Metric label="Défaite" value={`${preview.outcomes.awayWinRate}%`} /></div>
-      <div className="preview-expected"><span>{preview.expected.homeGoals} buts</span><span>{preview.expected.homeShots} tirs</span><span>{preview.expected.homePossession}% possession</span></div>
-      <h3>Contributeurs offensifs</h3>
-      {preview.contributors.attacking.map((profile) => <p key={profile.key}>{profile.playerName}<strong>{profile.per90.attackingContributions}/90</strong></p>)}
-      <h3>Actions défensives</h3>
-      {preview.contributors.defensive.map((profile) => <p key={profile.key}>{profile.playerName}<strong>{profile.per90.defensiveActions}/90</strong></p>)}
     </section>
   );
 }

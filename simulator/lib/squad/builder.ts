@@ -111,6 +111,21 @@ export function assignPlayerToSlot(
   slotId: SquadSlotId,
   player: PlayerCard,
 ): SquadDraft {
+  const sourceSlot = SQUAD_SLOT_IDS.find(
+    (candidate) => draft.starters[candidate]?.playerId === player.playerId,
+  );
+  const displaced = draft.starters[slotId];
+  if (sourceSlot === slotId) return draft;
+  if (sourceSlot && displaced) {
+    return {
+      ...draft,
+      starters: {
+        ...draft.starters,
+        [sourceSlot]: displaced,
+        [slotId]: player,
+      },
+    };
+  }
   const cleaned = removePlayer(draft, player.playerId);
   return {
     ...cleaned,

@@ -1,9 +1,10 @@
-import Link from "next/link";
 import { AnalyticsDashboard } from "@/components/AnalyticsDashboard";
+import { ProductNav } from "@/components/ProductNav";
 
 export default function AnalyticsPage() {
   return (
     <main className="page-shell">
+      <ProductNav />
       <header className="hero">
         <div>
           <p className="eyebrow">FUT MANAGER — BALANCE LAB</p>
@@ -13,10 +14,6 @@ export default function AnalyticsPage() {
             déterministes, sans générer de replay.
           </p>
         </div>
-        <nav className="hero-nav">
-          <Link className="primary-button nav-link" href="/squad">Squad Builder</Link>
-          <Link className="control-button nav-link" href="/">Retour au match</Link>
-        </nav>
       </header>
 
       <AnalyticsDashboard />

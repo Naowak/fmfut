@@ -46,6 +46,17 @@ describe("Squad Builder domain", () => {
     expect(playerInDraft(draft, player.playerId)).toBe(true);
   });
 
+  it("swaps two starters instead of deleting the displaced player", () => {
+    const draft = draftFromSelection(DEFAULT_HOME_SELECTION, demoPlayers);
+    const striker = draft.starters.ST!;
+    const leftWing = draft.starters.LW!;
+    const swapped = assignPlayerToSlot(draft, "LW", striker);
+
+    expect(swapped.starters.LW).toEqual(striker);
+    expect(swapped.starters.ST).toEqual(leftWing);
+    expect(allDraftPlayers(swapped)).toHaveLength(allDraftPlayers(draft).length);
+  });
+
   it("does not exceed the configured bench limit", () => {
     let draft = createEmptyDraft();
     for (const player of players.slice(0, 8)) {

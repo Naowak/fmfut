@@ -1,13 +1,18 @@
-# FUT Manager — Next.js 2D Match Simulator V0.9
+# FUT Manager — Squad Builder & Match Simulator V0.10.0
 
 Prototype de moteur de match pour le projet FUT Manager.
 
-Version moteur : **0.9.0**. Contrat public : **1.0.0**.
+Version application : **0.10.0**. Version moteur : **0.9.0**. Contrat public : **1.0.0**.
 
-## Squad Builder V1
+## Squad Builder V0.10.0
 
-La route `http://localhost:3000/squad` permet de construire et tester un XI
-4-3-3 à partir des 18 405 joueurs du dataset :
+Trois routes séparent maintenant la construction, les matchs et les tests :
+
+- `http://localhost:3000/squad`
+- `http://localhost:3000/squad/match`
+- `http://localhost:3000/squad/tests`
+
+Elles permettent de travailler sur un XI 4-3-3 à partir des 18 405 joueurs du dataset :
 
 - recherche paginée par nom, poste, nationalité et overall ;
 - placement par clic ou glisser-déposer, rôles individuels et banc de 7 joueurs ;
@@ -17,7 +22,7 @@ La route `http://localhost:3000/squad` permet de construire et tester un XI
 - projection Monte-Carlo déterministe puis lancement d'un match complet.
 
 Les prix, le marché, les comptes, les effectifs serveur et les autres
-formations restent volontairement hors périmètre de cette V1.
+formations restent volontairement hors périmètre de cette version.
 
 API associées :
 

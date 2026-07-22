@@ -1,9 +1,10 @@
-import Link from "next/link";
 import { MatchSimulator } from "@/components/MatchSimulator";
+import { ProductNav } from "@/components/ProductNav";
 
 export default function HomePage() {
   return (
     <main className="page-shell">
+      <ProductNav />
       <header className="hero">
         <div>
           <p className="eyebrow">FUT MANAGER — MATCH ENGINE</p>
@@ -13,10 +14,6 @@ export default function HomePage() {
             Le résultat est calculé intégralement côté serveur avant la première image.
           </p>
         </div>
-        <nav className="hero-nav">
-          <Link className="primary-button nav-link" href="/squad">Squad Builder</Link>
-          <Link className="control-button nav-link" href="/analytics">Balance Lab</Link>
-        </nav>
       </header>
 
       <MatchSimulator />
