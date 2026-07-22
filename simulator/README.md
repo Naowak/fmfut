@@ -4,6 +4,27 @@ Prototype de moteur de match pour le projet FUT Manager.
 
 Version moteur : **0.9.0**. Contrat public : **1.0.0**.
 
+## Squad Builder V1
+
+La route `http://localhost:3000/squad` permet de construire et tester un XI
+4-3-3 à partir des 18 405 joueurs du dataset :
+
+- recherche paginée par nom, poste, nationalité et overall ;
+- placement par clic ou glisser-déposer, rôles individuels et banc de 7 joueurs ;
+- diagnostic de compatibilité, synergies et six axes collectifs ;
+- comparaison avec benchmarks statistiques par poste ;
+- sauvegarde locale et import/export JSON versionné ;
+- projection Monte-Carlo déterministe puis lancement d'un match complet.
+
+Les prix, le marché, les comptes, les effectifs serveur et les autres
+formations restent volontairement hors périmètre de cette V1.
+
+API associées :
+
+- `GET /api/squad/bootstrap`
+- `GET /api/players/benchmarks`
+- `POST /api/squad/preview`
+
 ## Architecture
 
 Le principe est volontairement strict :

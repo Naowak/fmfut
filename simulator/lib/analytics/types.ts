@@ -207,11 +207,16 @@ export interface CalibrationReport {
   };
   distributions: {
     totalGoals: DistributionSummary;
+    homeGoals: DistributionSummary;
+    awayGoals: DistributionSummary;
     totalShots: DistributionSummary;
+    homeShots: DistributionSummary;
+    awayShots: DistributionSummary;
     totalPasses: DistributionSummary;
     totalFouls: DistributionSummary;
     totalCards: DistributionSummary;
     possessionDifference: DistributionSummary;
+    homePossession: DistributionSummary;
   };
   individual: PlayerDecisionProfile[];
   positions: PositionDecisionProfile[];

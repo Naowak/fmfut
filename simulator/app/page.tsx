@@ -13,9 +13,10 @@ export default function HomePage() {
             Le résultat est calculé intégralement côté serveur avant la première image.
           </p>
         </div>
-        <Link className="control-button nav-link" href="/analytics">
-          Balance Lab
-        </Link>
+        <nav className="hero-nav">
+          <Link className="primary-button nav-link" href="/squad">Squad Builder</Link>
+          <Link className="control-button nav-link" href="/analytics">Balance Lab</Link>
+        </nav>
       </header>
 
       <MatchSimulator />

@@ -13,9 +13,10 @@ export default function AnalyticsPage() {
             déterministes, sans générer de replay.
           </p>
         </div>
-        <Link className="control-button nav-link" href="/">
-          Retour au match
-        </Link>
+        <nav className="hero-nav">
+          <Link className="primary-button nav-link" href="/squad">Squad Builder</Link>
+          <Link className="control-button nav-link" href="/">Retour au match</Link>
+        </nav>
       </header>
 
       <AnalyticsDashboard />

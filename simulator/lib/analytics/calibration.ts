@@ -89,9 +89,13 @@ export function runCalibrationSuite(params: {
           (output) => output.result.homeScore + output.result.awayScore,
         ),
       ),
+      homeGoals: distribution(outputs.map((output) => output.result.homeScore)),
+      awayGoals: distribution(outputs.map((output) => output.result.awayScore)),
       totalShots: distribution(
         outputs.map((output) => output.stats.home.shots + output.stats.away.shots),
       ),
+      homeShots: distribution(outputs.map((output) => output.stats.home.shots)),
+      awayShots: distribution(outputs.map((output) => output.stats.away.shots)),
       totalPasses: distribution(
         outputs.map(
           (output) =>
@@ -114,6 +118,9 @@ export function runCalibrationSuite(params: {
         outputs.map(
           (output) => output.stats.home.possession - output.stats.away.possession,
         ),
+      ),
+      homePossession: distribution(
+        outputs.map((output) => output.stats.home.possession),
       ),
     },
     individual: aggregatePlayerPerformance(playerMatches),
