@@ -3,12 +3,15 @@ import { simulateMatch } from "@/lib/game";
 import type {
   PlayerCard,
   PlayerMatchStats,
+  TeamSpatialAnalytics,
+  SpatialSliceKey,
   TeamMatchStats,
   TeamSelection,
 } from "@/lib/game/types";
 import type {
   SquadPlayerAverage,
   SquadPreviewResponse,
+  SquadSpatialSide,
   SquadTeamAverage,
 } from "./api-types";
 
@@ -19,15 +22,37 @@ export function runSquadMonteCarlo(params: {
   runs: number;
   seedPrefix: string;
 }): SquadPreviewResponse {
-  const matches = Array.from({ length: params.runs }, (_, index) =>
-    simulateMatch({
-      home: params.team,
-      away: params.opponent,
+  const matches = Array.from({ length: params.runs }, (_, index) => {
+    const reversed = index % 2 === 1;
+    const output = simulateMatch({
+      home: reversed ? params.opponent : params.team,
+      away: reversed ? params.team : params.opponent,
       players: params.players,
       seed: `${params.seedPrefix}-${index}`,
       recordReplay: false,
-    }),
-  );
+      recordSpatialAnalytics: true,
+    });
+    return {
+      result: {
+        homeScore: reversed ? output.result.awayScore : output.result.homeScore,
+        awayScore: reversed ? output.result.homeScore : output.result.awayScore,
+      },
+      stats: {
+        home: reversed ? output.stats.away : output.stats.home,
+        away: reversed ? output.stats.home : output.stats.away,
+      },
+      playerStats: {
+        home: reversed ? output.playerStats.away : output.playerStats.home,
+        away: reversed ? output.playerStats.home : output.playerStats.away,
+      },
+      analytics: output.analytics ? {
+        columns: output.analytics.columns,
+        rows: output.analytics.rows,
+        home: reversed ? output.analytics.away : output.analytics.home,
+        away: reversed ? output.analytics.home : output.analytics.away,
+      } : undefined,
+    };
+  });
   const homeWins = matches.filter(
     (match) => match.result.homeScore > match.result.awayScore,
   ).length;
@@ -72,7 +97,61 @@ export function runSquadMonteCarlo(params: {
         params.runs,
       ),
     },
+    spatial: aggregateSpatial(matches),
     reliability: params.runs >= 50 ? "HIGH" : params.runs >= 30 ? "MEDIUM" : "LOW",
+  };
+}
+
+function aggregateSpatial(
+  matches: Array<{ analytics?: { columns: number; rows: number; home: TeamSpatialAnalytics; away: TeamSpatialAnalytics } }>,
+) {
+  const spatial = matches.map((match) => match.analytics).filter((value): value is NonNullable<typeof value> => Boolean(value));
+  if (spatial.length === 0) return null;
+  return {
+    columns: spatial[0].columns,
+    rows: spatial[0].rows,
+    team: aggregateSpatialSide(spatial.map((item) => item.home)),
+    opponent: aggregateSpatialSide(spatial.map((item) => item.away)),
+  };
+}
+
+function aggregateSpatialSide(teams: TeamSpatialAnalytics[]): SquadSpatialSide {
+  const cells = teams[0].allPlayersHeatmap.length;
+  const allPlayersHeatmap = Array(cells).fill(0) as number[];
+  const playerHeatmaps: Record<number, number[]> = {};
+  const sliceKeys: SpatialSliceKey[] = ["ALL", "FIRST_HALF", "SECOND_HALF", "IN_POSSESSION", "OUT_OF_POSSESSION"];
+  const heatmapSlices = Object.fromEntries(sliceKeys.map((key) => [key, {
+    allPlayersHeatmap: Array(cells).fill(0) as number[],
+    playerHeatmaps: {} as Record<number, number[]>,
+  }])) as SquadSpatialSide["heatmapSlices"];
+  for (const team of teams) {
+    team.allPlayersHeatmap.forEach((value, index) => { allPlayersHeatmap[index] += value; });
+    for (const [playerId, values] of Object.entries(team.playerHeatmaps)) {
+      const target = playerHeatmaps[Number(playerId)] ?? (playerHeatmaps[Number(playerId)] = Array(cells).fill(0));
+      values.forEach((value, index) => { target[index] += value; });
+    }
+    for (const key of sliceKeys) {
+      const source = team.heatmapSlices[key];
+      const target = heatmapSlices[key];
+      source.allPlayersHeatmap.forEach((value, index) => { target.allPlayersHeatmap[index] += value; });
+      for (const [playerId, values] of Object.entries(source.playerHeatmaps)) {
+        const playerTarget = target.playerHeatmaps[Number(playerId)] ?? (target.playerHeatmaps[Number(playerId)] = Array(cells).fill(0));
+        values.forEach((value, index) => { playerTarget[index] += value; });
+      }
+    }
+  }
+  const averageMetric = (key: keyof Pick<TeamSpatialAnalytics,
+    "averageBlockCenterProgress" | "averageBlockDepth" | "averageBlockWidth" | "averagePlayersInAttackingHalf" | "averageDefensiveLineProgress">) =>
+    round(teams.reduce((sum, team) => sum + team[key], 0) / teams.length, 3);
+  return {
+    allPlayersHeatmap,
+    playerHeatmaps,
+    heatmapSlices,
+    averageBlockCenterProgress: averageMetric("averageBlockCenterProgress"),
+    averageBlockDepth: averageMetric("averageBlockDepth"),
+    averageBlockWidth: averageMetric("averageBlockWidth"),
+    averagePlayersInAttackingHalf: averageMetric("averagePlayersInAttackingHalf"),
+    averageDefensiveLineProgress: averageMetric("averageDefensiveLineProgress"),
   };
 }
 

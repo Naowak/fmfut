@@ -10,6 +10,7 @@ import type {
   TeamSelection,
   TeamSide,
   Vec2,
+  FormationId,
 } from "./types";
 
 export type RuntimePlayerMatchStats = {
@@ -54,6 +55,7 @@ export type RuntimePlayer = {
   slotId: string | null;
   assignedPosition: Position | null;
   role: Role;
+  formationId: FormationId;
   synergyBonus: number;
   stunnedUntil: number;
   runTarget: Vec2 | null;
@@ -152,6 +154,8 @@ export type RestartState = {
 export type SpatialTeamAccumulator = {
   samples: number;
   allPlayersHeatmap: number[];
+  playerHeatmaps: Record<number, number[]>;
+  heatmapSlices: Record<SpatialSliceKey, SpatialHeatmapAccumulator>;
   positionHeatmaps: Partial<Record<Position, number[]>>;
   blockCenterProgressSum: number;
   blockCenterProgressSquaredSum: number;
@@ -167,6 +171,13 @@ export type SpatialTeamAccumulator = {
   outOfPossessionBlockCenterSum: number;
   possessionWidthSum: number;
   outOfPossessionWidthSum: number;
+};
+
+export type SpatialSliceKey = "ALL" | "FIRST_HALF" | "SECOND_HALF" | "IN_POSSESSION" | "OUT_OF_POSSESSION";
+
+export type SpatialHeatmapAccumulator = {
+  allPlayersHeatmap: number[];
+  playerHeatmaps: Record<number, number[]>;
 };
 
 export type SpatialAccumulator = {

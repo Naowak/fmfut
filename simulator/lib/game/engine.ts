@@ -9,7 +9,7 @@ import { clamp, ENGINE_VERSION, MATCH_CONFIG, round } from "./config";
 import {
   attackDirection,
   anchorForSide,
-  FORMATION_433,
+  getFormation,
   getSlot,
   opponentGoal,
   ownGoal,
@@ -158,8 +158,13 @@ export function simulateMatch(
   recomputeSynergy(away);
 
   const rng = new SeededRng(params.seed);
+  // Un flux distinct garde la simulation reproductible tout en attribuant
+  // l'engagement sans favoriser systématiquement le premier côté.
+  const kickoffRng = new SeededRng(`${params.seed}:kickoff`);
+  const firstKickoffTeamIndex: TeamIndex = kickoffRng.chance(0.5) ? 1 : 0;
+  const firstKickoffTeam = firstKickoffTeamIndex === 0 ? home : away;
   const kickoffOwner =
-    findActiveBySlot(home, "ST") ?? firstActiveOutfield(home);
+    findActiveBySlot(firstKickoffTeam, "ST") ?? firstActiveOutfield(firstKickoffTeam);
 
   const state: MatchState = {
     t: 0,
@@ -192,7 +197,7 @@ export function simulateMatch(
     recordReplay: params.recordReplay ?? true,
     recordSpatialAnalytics: params.recordSpatialAnalytics ?? false,
     spatial: createSpatialAccumulator(),
-    possessionTeamIndex: home.index,
+    possessionTeamIndex: firstKickoffTeamIndex,
     possessionChangedAt: 0,
     notifications: {
       injuries: [],
@@ -200,11 +205,11 @@ export function simulateMatch(
     },
   };
 
-  resetForKickoff(state, home.index);
+  resetForKickoff(state, firstKickoffTeamIndex);
   emit(state, {
     type: "KICKOFF",
-    team: "HOME",
-    message: `Coup d'envoi pour ${home.name}.`,
+    team: firstKickoffTeam.side,
+    message: `Coup d'envoi pour ${firstKickoffTeam.name}.`,
   });
   if (state.recordReplay) {
     captureFrame(state);
@@ -243,11 +248,12 @@ export function simulateMatch(
         state.halftimeEmitted = true;
         state.nextDecisionAt = state.t;
         processPendingSubstitutions(state, SUBSTITUTION_HOOKS);
-        resetForKickoff(state, away.index);
+        const secondKickoffTeam = firstKickoffTeamIndex === 0 ? away : home;
+        resetForKickoff(state, secondKickoffTeam.index);
         emit(state, {
           type: "KICKOFF",
-          team: "AWAY",
-          message: `${away.name} donne le coup d'envoi de la seconde période.`,
+          team: secondKickoffTeam.side,
+          message: `${secondKickoffTeam.name} donne le coup d'envoi de la seconde période.`,
         });
         if (state.recordReplay) captureFrame(state);
       } else {
@@ -284,6 +290,7 @@ export function simulateMatch(
         state.spatial,
         state.teams,
         state.possessionTeamIndex,
+        state.period,
       );
       state.nextSpatialAt += MATCH_CONFIG.spatialSampleInterval;
     }
@@ -394,7 +401,7 @@ function createRuntimeTeam(
 ): RuntimeTeam {
   const players: RuntimePlayer[] = [];
 
-  FORMATION_433.forEach((slot, slotIndex) => {
+  getFormation(selection.formationId).forEach((slot, slotIndex) => {
     const playerId = selection.starters[slot.id];
     const card = playerMap.get(playerId);
     if (!card) {
@@ -420,6 +427,7 @@ function createRuntimeTeam(
       slotId: slot.id,
       assignedPosition: slot.position,
       role: selection.roles?.[slot.id] ?? "NORMAL",
+      formationId: selection.formationId,
       synergyBonus: 0,
       stunnedUntil: 0,
       runTarget: null,
@@ -452,6 +460,7 @@ function createRuntimeTeam(
       slotId: null,
       assignedPosition: null,
       role: "NORMAL",
+      formationId: selection.formationId,
       synergyBonus: 0,
       stunnedUntil: 0,
       runTarget: null,
@@ -1879,8 +1888,10 @@ function updatePlayerTargets(state: MatchState): void {
     );
 
     const buildUp = team.selection.tactics?.buildUp ?? "BALANCED";
+    const configuredWidth = team.selection.tactics?.width ?? "BALANCED";
     const widthTacticModifier =
-      buildUp === "SHORT" ? -0.05 : buildUp === "DIRECT" ? 0.04 : 0;
+      (buildUp === "SHORT" ? -0.05 : buildUp === "DIRECT" ? 0.04 : 0) +
+      (configuredWidth === "NARROW" ? -0.08 : configuredWidth === "WIDE" ? 0.08 : 0);
     const widthScale =
       (hasPossession
         ? MATCH_CONFIG.block.attackWidth
@@ -1899,7 +1910,7 @@ function updatePlayerTargets(state: MatchState): void {
     );
 
     for (const player of activePlayers) {
-      const slot = getSlot(player.slotId!);
+      const slot = getSlot(player.slotId!, player.formationId);
       const anchor = anchorForSide(slot.anchor, player.side);
       const anchorProgress = toTeamProgress(anchor.x, player.side);
       const roleShift =
@@ -1988,10 +1999,13 @@ function updatePlayerTargets(state: MatchState): void {
             distanceBetween(b.pos, owner.pos),
         );
 
-      const pressers = defenders.slice(
-        0,
-        defenders[0]?.role === "PRESSING" ? 2 : 1,
-      );
+      const pressing = team.selection.tactics?.pressing ?? "BALANCED";
+      const presserCount = pressing === "AGGRESSIVE"
+        ? 2
+        : pressing === "CAUTIOUS"
+          ? (defenders[0]?.role === "PRESSING" ? 1 : 0)
+          : (defenders[0]?.role === "PRESSING" ? 2 : 1);
+      const pressers = defenders.slice(0, presserCount);
 
       pressers.forEach((presser, index) => {
         const pressureDistance = index === 0 ? 0.012 : 0.035;
@@ -2171,7 +2185,7 @@ function positionTeamsForKickoff(
     for (const player of team.players) {
       if (!player.active || !player.slotId) continue;
 
-      const anchor = anchorForSide(getSlot(player.slotId).anchor, player.side);
+      const anchor = anchorForSide(getSlot(player.slotId, player.formationId).anchor, player.side);
       let ownHalfProgress = Math.min(
         toTeamProgress(anchor.x, player.side),
         0.47,
@@ -2219,7 +2233,7 @@ function positionPlayersForRestart(
   for (const team of state.teams) {
     for (const player of team.players) {
       if (!player.active || !player.slotId) continue;
-      const anchor = anchorForSide(getSlot(player.slotId).anchor, player.side);
+      const anchor = anchorForSide(getSlot(player.slotId, player.formationId).anchor, player.side);
       player.pos = { ...anchor };
       player.target = { ...anchor };
       player.runTarget = null;

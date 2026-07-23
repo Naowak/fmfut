@@ -179,10 +179,13 @@ export function PitchCanvas({ replay, homeColor, awayColor, homeBadge = "●", a
 
   const clockLabel = snapshot ? formatMatchClock(snapshot) : "0:00";
   const viewerStyle = {
-    maxWidth: `${pitchMaxWidth}px`,
+    maxWidth: "100%",
     width: fitViewport
-      ? `min(100%, clamp(320px, calc((100svh - 185px) * 0.7069), ${pitchMaxWidth}px))`
+      ? "auto"
       : "100%",
+    height: fitViewport
+      ? `min(calc(100svh - 88px), ${Math.round(pitchMaxWidth / 0.7069)}px)`
+      : "auto",
   };
 
   function resetPlaybackEventState() {
@@ -253,7 +256,10 @@ export function PitchCanvas({ replay, homeColor, awayColor, homeBadge = "●", a
           )}
         </div>
 
-        <div className="replay-controls replay-controls-v07" style={viewerStyle}>
+      </div>
+
+      <div className="match-side-column">
+        <div className="replay-controls replay-controls-v07 replay-controls-side">
           <div className="replay-scoreline">
             <span className="score-team score-team-home"><i>{homeBadge}</i>{replay.homeName}</span>
             <strong>{liveScore.home} – {liveScore.away}</strong>
@@ -330,9 +336,7 @@ export function PitchCanvas({ replay, homeColor, awayColor, homeBadge = "●", a
           </div>
         </div>
 
-      </div>
-
-      <aside className="commentary-panel">
+        <aside className="commentary-panel">
         <div className="commentary-header">
           <h2>Fil du match</h2>
           <span className="commentary-minute">
@@ -351,7 +355,8 @@ export function PitchCanvas({ replay, homeColor, awayColor, homeBadge = "●", a
             ))
           )}
         </div>
-      </aside>
+        </aside>
+      </div>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import {
   parseSnapshot,
   type SquadDraft,
 } from "./builder";
+import { DEFAULT_STRATEGY_EMBLEM, DEFAULT_TEAM_EMBLEM } from "./emblems";
 
 export const SQUAD_STORAGE_KEY = "fmfut:squad-builder:v1";
 export const WORKSPACE_STORAGE_KEY = "fmfut:squad-workspace:v2";
@@ -11,6 +12,7 @@ export const WORKSPACE_STORAGE_KEY = "fmfut:squad-workspace:v2";
 export interface SavedStrategy {
   id: string;
   name: string;
+  emblem: string;
   draft: SquadDraft;
   updatedAt: string;
 }
@@ -36,7 +38,7 @@ export function emptyWorkspace(): SquadWorkspace {
 export function createSavedTeam(
   draft = createEmptyDraft("Nouvelle équipe"),
   strategyName = "Principale",
-  emblem = "⚽",
+  emblem = DEFAULT_TEAM_EMBLEM,
 ): SavedTeam {
   const teamId = createId("team");
   return {
@@ -50,10 +52,12 @@ export function createSavedTeam(
 export function createSavedStrategy(
   draft: SquadDraft,
   name = "Nouvelle stratégie",
+  emblem = DEFAULT_STRATEGY_EMBLEM,
 ): SavedStrategy {
   return {
     id: createId("strategy"),
     name,
+    emblem,
     draft: cloneDraft(draft),
     updatedAt: new Date().toISOString(),
   };
@@ -102,14 +106,27 @@ export function parseWorkspace(value: string): SquadWorkspace {
       if (!strategy || typeof strategy.id !== "string" || typeof strategy.name !== "string") {
         throw new Error("Stratégie sauvegardée invalide.");
       }
-      parseSnapshot(JSON.stringify({ version: 1, savedAt: strategy.updatedAt, draft: strategy.draft }));
     }
   }
   return {
     ...(parsed as SquadWorkspace),
     teams: (parsed.teams as SavedTeam[]).map((team) => ({
       ...team,
-      emblem: typeof team.emblem === "string" && team.emblem.trim() ? team.emblem : "⚽",
+      emblem: typeof team.emblem === "string" && team.emblem.trim() ? team.emblem : DEFAULT_TEAM_EMBLEM,
+      strategies: team.strategies.map((strategy) => {
+        const draft = parseSnapshot(JSON.stringify({
+          version: 1,
+          savedAt: strategy.updatedAt,
+          draft: strategy.draft,
+        })).draft;
+        return {
+          ...strategy,
+          draft,
+          emblem: typeof strategy.emblem === "string" && strategy.emblem.trim()
+            ? strategy.emblem
+            : DEFAULT_STRATEGY_EMBLEM,
+        };
+      }),
     })),
   };
 }

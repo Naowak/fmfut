@@ -23,7 +23,6 @@ export function MatchSimulator() {
   const [awayId, setAwayId] = useState("argentina-2026");
   const [homeColor, setHomeColor] = useState("#2563eb");
   const [awayColor, setAwayColor] = useState("#dc2626");
-  const [pitchMaxWidth, setPitchMaxWidth] = useState(580);
   const [match, setMatch] = useState<MatchSimulationOutput | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,8 +81,8 @@ export function MatchSimulator() {
     <section className="simulator-shell">
       <div className="card main-card">
         <div className="toolbar toolbar-v07">
-          <TeamSelect id="quick-home" label="Équipe à domicile" value={homeId} onChange={(value) => { setHomeId(value); setMatch(null); }} teams={teams} disabledValue={awayId} />
-          <TeamSelect id="quick-away" label="Équipe à l’extérieur" value={awayId} onChange={(value) => { setAwayId(value); setMatch(null); }} teams={teams} disabledValue={homeId} />
+          <TeamSelect id="quick-home" label="Équipe 1" value={homeId} onChange={(value) => { setHomeId(value); setMatch(null); }} teams={teams} disabledValue={awayId} />
+          <TeamSelect id="quick-away" label="Équipe 2" value={awayId} onChange={(value) => { setAwayId(value); setMatch(null); }} teams={teams} disabledValue={homeId} />
 
           <div className="field-group">
             <label htmlFor="seed">Seed déterministe</label>
@@ -97,7 +96,7 @@ export function MatchSimulator() {
 
           <ColorSelect
             id="home-color"
-            label="Couleur domicile"
+            label="Couleur équipe 1"
             value={homeColor}
             onChange={setHomeColor}
             disabledValue={awayColor}
@@ -105,24 +104,11 @@ export function MatchSimulator() {
 
           <ColorSelect
             id="away-color"
-            label="Couleur extérieur"
+            label="Couleur équipe 2"
             value={awayColor}
             onChange={setAwayColor}
             disabledValue={homeColor}
           />
-
-          <div className="field-group pitch-size-field">
-            <label htmlFor="pitch-size">Taille terrain · {pitchMaxWidth}px</label>
-            <input
-              id="pitch-size"
-              type="range"
-              min={320}
-              max={760}
-              step={20}
-              value={pitchMaxWidth}
-              onChange={(event) => setPitchMaxWidth(Number(event.target.value))}
-            />
-          </div>
 
           <button
             type="button"
@@ -158,7 +144,7 @@ export function MatchSimulator() {
               awayColor={awayColor}
               homeBadge={home?.flag}
               awayBadge={away?.flag}
-              pitchMaxWidth={pitchMaxWidth}
+              pitchMaxWidth={900}
               fitViewport
             />
           </div>

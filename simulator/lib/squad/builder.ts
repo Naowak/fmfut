@@ -1,6 +1,7 @@
 import { positionCompatibility } from "@/lib/game/compatibility";
-import { FORMATION_433 } from "@/lib/game/formations";
+import { getFormation } from "@/lib/game/formations";
 import type {
+  FormationId,
   PlayerCard,
   Position,
   Role,
@@ -25,6 +26,7 @@ export type SquadSlotId = (typeof SQUAD_SLOT_IDS)[number];
 
 export interface SquadDraft {
   name: string;
+  formationId: FormationId;
   starters: Partial<Record<SquadSlotId, PlayerCard>>;
   bench: PlayerCard[];
   roles: Partial<Record<SquadSlotId, Role>>;
@@ -72,10 +74,11 @@ export interface SquadDiagnostics {
 export function createEmptyDraft(name = "Mon XI"): SquadDraft {
   return {
     name,
+    formationId: "4-3-3",
     starters: {},
     bench: [],
     roles: {},
-    tactics: { blockHeight: "NORMAL", buildUp: "BALANCED" },
+    tactics: { blockHeight: "NORMAL", buildUp: "BALANCED", pressing: "BALANCED", width: "BALANCED" },
   };
 }
 
@@ -92,6 +95,7 @@ export function draftFromSelection(
   }
   return {
     name: selection.name,
+    formationId: selection.formationId ?? "4-3-3",
     starters,
     bench: selection.bench.map((id) => {
       const player = byId.get(id);
@@ -99,9 +103,11 @@ export function draftFromSelection(
       return player;
     }),
     roles: { ...(selection.roles as SquadDraft["roles"]) },
-    tactics: selection.tactics ?? {
-      blockHeight: "NORMAL",
-      buildUp: "BALANCED",
+    tactics: {
+      blockHeight: selection.tactics?.blockHeight ?? "NORMAL",
+      buildUp: selection.tactics?.buildUp ?? "BALANCED",
+      pressing: selection.tactics?.pressing ?? "BALANCED",
+      width: selection.tactics?.width ?? "BALANCED",
     },
   };
 }
@@ -194,20 +200,25 @@ export function toTeamSelection(draft: SquadDraft): TeamSelection {
   }
   return {
     name: draft.name.trim() || "Mon XI",
-    formationId: "4-3-3",
+    formationId: draft.formationId ?? "4-3-3",
     starters: Object.fromEntries(
       SQUAD_SLOT_IDS.map((slotId) => [slotId, draft.starters[slotId]!.playerId]),
     ),
     bench: draft.bench.map((player) => player.playerId),
     roles: { ...draft.roles },
-    tactics: { ...draft.tactics },
+    tactics: {
+      blockHeight: draft.tactics.blockHeight,
+      buildUp: draft.tactics.buildUp,
+      ...(draft.tactics.pressing && draft.tactics.pressing !== "BALANCED" ? { pressing: draft.tactics.pressing } : {}),
+      ...(draft.tactics.width && draft.tactics.width !== "BALANCED" ? { width: draft.tactics.width } : {}),
+    },
   };
 }
 
 export function diagnoseSquad(draft: SquadDraft): SquadDiagnostics {
   const slots: SlotDiagnostic[] = [];
   let synergyLinks = 0;
-  for (const slot of FORMATION_433) {
+  for (const slot of getFormation(draft.formationId)) {
     const slotId = slot.id as SquadSlotId;
     const player = draft.starters[slotId];
     if (!player) continue;
@@ -301,6 +312,13 @@ export function parseSnapshot(value: string): SquadSnapshot {
   const parsed = JSON.parse(value) as unknown;
   if (!parsed || typeof parsed !== "object") throw new Error("Fichier de composition invalide.");
   const snapshot = parsed as Partial<SquadSnapshot>;
+  if (snapshot.draft && typeof snapshot.draft === "object") {
+    const draft = snapshot.draft as SquadDraft;
+    draft.formationId ??= "4-3-3";
+    draft.tactics ??= { blockHeight: "NORMAL", buildUp: "BALANCED" };
+    draft.tactics.pressing ??= "BALANCED";
+    draft.tactics.width ??= "BALANCED";
+  }
   if (snapshot.version !== 1 || !snapshot.draft || !isDraft(snapshot.draft)) {
     throw new Error("Format de composition non reconnu.");
   }
@@ -349,6 +367,7 @@ function isDraft(value: unknown): value is SquadDraft {
   const draft = value as Partial<SquadDraft>;
   if (
     typeof draft.name !== "string" ||
+    !["4-3-3", "4-2-3-1", "4-1-4-1"].includes(draft.formationId ?? "") ||
     !draft.starters ||
     !draft.roles ||
     !draft.tactics ||
@@ -364,7 +383,9 @@ function isDraft(value: unknown): value is SquadDraft {
         validRoles.includes(role as Role),
     ) ||
     !["LOW", "NORMAL", "HIGH"].includes(draft.tactics.blockHeight) ||
-    !["SHORT", "BALANCED", "DIRECT"].includes(draft.tactics.buildUp)
+    !["SHORT", "BALANCED", "DIRECT"].includes(draft.tactics.buildUp) ||
+    !["CAUTIOUS", "BALANCED", "AGGRESSIVE"].includes(draft.tactics.pressing ?? "BALANCED") ||
+    !["NARROW", "BALANCED", "WIDE"].includes(draft.tactics.width ?? "BALANCED")
   ) return false;
   return [...Object.values(draft.starters), ...draft.bench].every(
     (player) => player === undefined || isPlayerCard(player),

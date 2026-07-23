@@ -2,6 +2,7 @@ import { clamp, MATCH_CONFIG, round } from "./config";
 import type {
   RuntimeTeam,
   SpatialAccumulator,
+  SpatialSliceKey,
   SpatialTeamAccumulator,
   TeamIndex,
 } from "./runtime";
@@ -40,9 +41,22 @@ function createSpatialTeamAccumulator(): SpatialTeamAccumulator {
     MATCH_CONFIG.analytics.heatmapColumns *
     MATCH_CONFIG.analytics.heatmapRows;
 
+  const allPlayersHeatmap = Array(cells).fill(0);
+  const playerHeatmaps: Record<number, number[]> = {};
+  const slice = () => ({ allPlayersHeatmap: Array(cells).fill(0) as number[], playerHeatmaps: {} as Record<number, number[]> });
+  const heatmapSlices: SpatialTeamAccumulator["heatmapSlices"] = {
+    ALL: { allPlayersHeatmap, playerHeatmaps },
+    FIRST_HALF: slice(),
+    SECOND_HALF: slice(),
+    IN_POSSESSION: slice(),
+    OUT_OF_POSSESSION: slice(),
+  };
+
   return {
     samples: 0,
-    allPlayersHeatmap: Array(cells).fill(0),
+    allPlayersHeatmap,
+    playerHeatmaps,
+    heatmapSlices,
     positionHeatmaps: Object.fromEntries(
       POSITIONS.map((position) => [position, Array(cells).fill(0)]),
     ) as Partial<Record<Position, number[]>>,
@@ -67,6 +81,7 @@ export function captureSpatialSample(
   spatial: SpatialAccumulator,
   teams: [RuntimeTeam, RuntimeTeam],
   possessionTeamIndex: TeamIndex,
+  period: 1 | 2,
 ): void {
   const { columns, rows } = spatial;
 
@@ -88,6 +103,20 @@ export function captureSpatialSample(
       const row = Math.min(rows - 1, Math.floor(progress * rows));
       const index = row * columns + column;
       accumulator.allPlayersHeatmap[index] += 1;
+      const playerHeatmap = accumulator.playerHeatmaps[player.card.playerId]
+        ?? (accumulator.playerHeatmaps[player.card.playerId] = Array(columns * rows).fill(0));
+      playerHeatmap[index] += 1;
+      const sliceKeys: SpatialSliceKey[] = [
+        period === 1 ? "FIRST_HALF" : "SECOND_HALF",
+        possessionTeamIndex === team.index ? "IN_POSSESSION" : "OUT_OF_POSSESSION",
+      ];
+      for (const key of sliceKeys) {
+        const slice = accumulator.heatmapSlices[key];
+        slice.allPlayersHeatmap[index] += 1;
+        const slicePlayer = slice.playerHeatmaps[player.card.playerId]
+          ?? (slice.playerHeatmaps[player.card.playerId] = Array(columns * rows).fill(0));
+        slicePlayer[index] += 1;
+      }
       accumulator.positionHeatmaps[player.assignedPosition!]?.splice(
         index,
         1,
@@ -163,6 +192,8 @@ function finalizeSpatialTeam(
   return {
     samples: accumulator.samples,
     allPlayersHeatmap: accumulator.allPlayersHeatmap,
+    playerHeatmaps: accumulator.playerHeatmaps,
+    heatmapSlices: accumulator.heatmapSlices,
     positionHeatmaps: accumulator.positionHeatmaps,
     averageBlockCenterProgress: round(
       accumulator.blockCenterProgressSum / divisor,

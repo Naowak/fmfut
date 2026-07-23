@@ -37,6 +37,19 @@ function expectFiniteTree(value: unknown): void {
 }
 
 describe("match engine public contract", () => {
+  it("supports alternative formations and tactical instructions", () => {
+    const output = simulateMatch({
+      home: { ...DEFAULT_HOME_SELECTION, formationId: "4-2-3-1", tactics: { blockHeight: "HIGH", buildUp: "SHORT", pressing: "AGGRESSIVE", width: "NARROW" } },
+      away: { ...DEFAULT_AWAY_SELECTION, formationId: "4-1-4-1", tactics: { blockHeight: "LOW", buildUp: "DIRECT", pressing: "CAUTIOUS", width: "WIDE" } },
+      players,
+      seed: "formations-v014",
+      logicalSeconds: 90,
+      recordReplay: false,
+    });
+    expect(output.result.homeScore).toBeGreaterThanOrEqual(0);
+    expect(output.playerStats.home.find((player) => player.runtimeId.endsWith(":RCM"))?.position).toBe("CAM");
+    expect(output.playerStats.away.find((player) => player.runtimeId.endsWith(":LW"))?.position).toBe("LM");
+  });
   it("preserves the V0.9 characterization match", () => {
     const output = simulateMatch({
       home: DEFAULT_HOME_SELECTION,

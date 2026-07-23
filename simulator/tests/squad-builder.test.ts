@@ -21,6 +21,7 @@ import {
   parseWorkspace,
   type SquadWorkspace,
 } from "../lib/squad/client-storage";
+import { STRATEGY_EMBLEMS, TEAM_EMBLEMS } from "../lib/squad/emblems";
 
 const players = loadPlayers();
 const demoPlayers = players.filter((player) =>
@@ -31,6 +32,11 @@ const demoPlayers = players.filter((player) =>
 );
 
 describe("Squad Builder domain", () => {
+  it("proposes 64 distinct emblems for teams and strategies", () => {
+    expect(new Set(TEAM_EMBLEMS).size).toBe(64);
+    expect(new Set(STRATEGY_EMBLEMS).size).toBe(64);
+    expect(TEAM_EMBLEMS.some((emblem) => STRATEGY_EMBLEMS.includes(emblem as never))).toBe(false);
+  });
   it("hydrates the demo XI and converts it back to an engine selection", () => {
     const draft = draftFromSelection(DEFAULT_HOME_SELECTION, demoPlayers);
     const selection = toTeamSelection(draft);
@@ -158,5 +164,29 @@ describe("Squad Builder domain", () => {
       "Prudente",
     ]);
     expect(activeWorkspaceDraft(restored)?.tactics.blockHeight).toBe("LOW");
+  });
+
+  it("migrates v0.13 workspace drafts without a formation", () => {
+    const draft = draftFromSelection(DEFAULT_HOME_SELECTION, demoPlayers);
+    const team = createSavedTeam(draft, "Principale");
+    const legacyDraft = team.strategies[0].draft as Partial<typeof draft>;
+    delete legacyDraft.formationId;
+    if (legacyDraft.tactics) {
+      delete legacyDraft.tactics.pressing;
+      delete legacyDraft.tactics.width;
+    }
+    const workspace: SquadWorkspace = {
+      version: 2,
+      activeTeamId: team.id,
+      activeStrategyId: team.strategies[0].id,
+      teams: [team],
+    };
+
+    const restored = parseWorkspace(JSON.stringify(workspace));
+    const migrated = activeWorkspaceDraft(restored)!;
+    expect(migrated.formationId).toBe("4-3-3");
+    expect(migrated.tactics.pressing).toBe("BALANCED");
+    expect(migrated.tactics.width).toBe("BALANCED");
+    expect(diagnoseSquad(migrated).complete).toBe(true);
   });
 });

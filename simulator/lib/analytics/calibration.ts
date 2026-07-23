@@ -142,7 +142,7 @@ export function assessCalibrationTargets(
     ["total-cards", "Cartons par match", report.distributions.totalCards.mean, 0.1, 1.5],
     [
       "home-balance",
-      "Avantage moyen domicile (valeur absolue)",
+      "Écart moyen entre les côtés (valeur absolue)",
       Math.abs(report.outcomes.averageGoalDifference),
       0,
       0.75,
@@ -236,16 +236,16 @@ export function validateMatchStatIntegrity(
   const homeOwnGoals = sum(output.playerStats.home, "ownGoals");
   const awayOwnGoals = sum(output.playerStats.away, "ownGoals");
   if (homeGoals + awayOwnGoals !== output.result.homeScore) {
-    violations.push("les buts individuels domicile ne correspondent pas au score");
+    violations.push("les buts individuels de l’équipe 1 ne correspondent pas au score");
   }
   if (awayGoals + homeOwnGoals !== output.result.awayScore) {
-    violations.push("les buts individuels extérieur ne correspondent pas au score");
+    violations.push("les buts individuels de l’équipe 2 ne correspondent pas au score");
   }
   if (sum(output.playerStats.home, "assists") > output.result.homeScore) {
-    violations.push("plus de passes décisives domicile que de buts");
+    violations.push("plus de passes décisives pour l’équipe 1 que de buts");
   }
   if (sum(output.playerStats.away, "assists") > output.result.awayScore) {
-    violations.push("plus de passes décisives extérieur que de buts");
+    violations.push("plus de passes décisives pour l’équipe 2 que de buts");
   }
   return violations;
 }

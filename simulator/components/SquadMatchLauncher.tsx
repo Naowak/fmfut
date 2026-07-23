@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PitchCanvas } from "./PitchCanvas";
-import { FORMATION_433 } from "@/lib/game/formations";
+import { getFormation } from "@/lib/game/formations";
 import { slotLabel } from "@/lib/game/localization";
 import type { MatchSimulationOutput, PlayerCard } from "@/lib/game/types";
 import type { SquadOpponent } from "@/lib/squad/api-types";
@@ -105,7 +105,7 @@ export function SquadMatchLauncher() {
             const team = workspace.teams.find((item) => item.id === event.target.value);
             setTeamId(event.target.value); setStrategyId(team?.strategies[0]?.id ?? ""); setMatch(null);
           }}>{workspace.teams.map((team) => <option key={team.id} value={team.id}>{team.emblem} {team.name}</option>)}</select></label>
-          <label className="squad-select-field">Stratégie<select value={strategyId} onChange={(event) => { setStrategyId(event.target.value); setMatch(null); }}>{selectedTeam?.strategies.map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.name}</option>)}</select></label>
+          <label className="squad-select-field">Stratégie<select value={strategyId} onChange={(event) => { setStrategyId(event.target.value); setMatch(null); }}>{selectedTeam?.strategies.map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.emblem} {strategy.name}</option>)}</select></label>
           <div className="match-team-status">
             <strong>{diagnostics?.filledSlots ?? 0}/11</strong>
             <span>{diagnostics?.complete ? "Prête à jouer" : "Composition incomplète"}</span>
@@ -124,7 +124,7 @@ export function SquadMatchLauncher() {
           {opponent && (
             <>
               <div className="opponent-lineup">
-                {FORMATION_433.map((slot) => {
+                {getFormation(opponent.selection.formationId).map((slot) => {
                   const player = opponent.players.find(
                     (candidate) => candidate.playerId === opponent.selection.starters[slot.id],
                   );

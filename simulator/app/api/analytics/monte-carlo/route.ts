@@ -25,6 +25,7 @@ import type {
   Position,
   TeamMatchStats,
   TeamSelection,
+  SpatialSliceKey,
 } from "@/lib/game/types";
 
 export const runtime = "nodejs";
@@ -33,7 +34,6 @@ export const dynamic = "force-dynamic";
 type RequestBody = {
   runs?: number;
   seedPrefix?: string;
-  sensitivity?: boolean;
   home?: TeamSelection;
   away?: TeamSelection;
 };
@@ -54,7 +54,6 @@ export async function POST(request: Request) {
     const body = (await request.json().catch(() => ({}))) as RequestBody;
     const runs = clampInteger(body.runs ?? 50, 10, 300);
     const seedPrefix = body.seedPrefix?.trim() || "mc";
-    const includeSensitivity = body.sensitivity ?? true;
 
     const context = createInternationalTeamContext(loadPlayers());
     const players = context.players;
@@ -75,8 +74,7 @@ export async function POST(request: Request) {
 
     const baseline = aggregate(baselineMatches);
     const spatial = aggregateSpatial(baselineMatches);
-    const sensitivity = includeSensitivity
-      ? ANALYZED_STATS.map((stat) =>
+    const sensitivity = ANALYZED_STATS.map((stat) =>
           runSensitivityExperiment({
             stat,
             boost: 10,
@@ -87,23 +85,18 @@ export async function POST(request: Request) {
             home,
             away,
           }),
-        )
-      : [];
+        );
 
-    const roleExperiment = includeSensitivity
-      ? runRoleExperiment({
+    const roleExperiment = runRoleExperiment({
           players,
           seedPrefix,
           runs,
           configuredMatches: baselineMatches,
           home,
           away,
-        })
-      : null;
+        });
 
-    const microBenchmarks = includeSensitivity
-      ? runMicroBenchmarks(players, 10000)
-      : [];
+    const microBenchmarks = runMicroBenchmarks(players, 10000);
 
     const response: MonteCarloResponse = {
       seedPrefix,
@@ -124,7 +117,7 @@ export async function POST(request: Request) {
         "Les simulations analytiques tournent avec recordReplay=false : aucun frame Canvas n'est généré.",
         "La baseline enregistre un échantillon spatial par seconde logique pour les heatmaps et les métriques de bloc.",
         "Les expériences de sensibilité utilisent exactement les mêmes seeds que la baseline.",
-        "Le boost de +10 est appliqué à la stat testée sur le onze titulaire domicile uniquement.",
+        "Le boost de +10 est appliqué à la stat testée sur le onze titulaire de l’équipe 1 uniquement.",
         "La V0.9 conserve les micro-benchmarks isolés pour vérifier qu'un +10 améliore directement la capacité concernée, indépendamment du chaos d'un match complet.",
         "Les deltas de buts affichent aussi leur erreur standard appariée : un delta du même ordre que son incertitude doit être interprété avec prudence.",
         "La V0.9 conserve les passes arrière, les remises au gardien et les buts contre son camp pour surveiller la construction basse.",
@@ -132,7 +125,7 @@ export async function POST(request: Request) {
         "La V0.9 conserve la scène au franchissement d'une ligne avant le repositionnement des touches, corners et six mètres.",
         "La V0.9 rend les gardiens plus conservateurs et évite l'enfermement répété des ailiers près du drapeau de corner.",
         "Les heatmaps sont exprimées dans le repère de chaque équipe : notre but en bas, but adverse en haut.",
-        "Le moteur ne possède encore qu'une formation 4-3-3 : la comparaison de formations sera ajoutée quand plusieurs formations existeront.",
+        "Les équipes peuvent être comparées avec leurs formations et consignes tactiques respectives.",
       ],
     };
 
@@ -164,9 +157,10 @@ function runBatch(params: {
   const matches: MatchSummary[] = [];
 
   for (let index = 0; index < params.runs; index += 1) {
+    const reversed = index % 2 === 1;
     const result = simulateMatch({
-      home: params.home,
-      away: params.away,
+      home: reversed ? params.away : params.home,
+      away: reversed ? params.home : params.away,
       players: params.players,
       seed: `${params.seedPrefix}-${index}`,
       recordReplay: false,
@@ -174,14 +168,22 @@ function runBatch(params: {
     });
 
     matches.push({
-      homeScore: result.result.homeScore,
-      awayScore: result.result.awayScore,
-      home: result.stats.home,
-      away: result.stats.away,
+      homeScore: reversed ? result.result.awayScore : result.result.homeScore,
+      awayScore: reversed ? result.result.homeScore : result.result.awayScore,
+      home: reversed ? result.stats.away : result.stats.home,
+      away: reversed ? result.stats.home : result.stats.away,
       firstHalfAddedTime: result.replay.addedTime.firstHalfMinutes,
       secondHalfAddedTime: result.replay.addedTime.secondHalfMinutes,
-      spatial: result.analytics,
-      playerStats: result.playerStats,
+      spatial: result.analytics ? {
+        columns: result.analytics.columns,
+        rows: result.analytics.rows,
+        home: reversed ? result.analytics.away : result.analytics.home,
+        away: reversed ? result.analytics.home : result.analytics.away,
+      } : undefined,
+      playerStats: {
+        home: (reversed ? result.playerStats.away : result.playerStats.home).map((row) => ({ ...row, team: "HOME" as const })),
+        away: (reversed ? result.playerStats.home : result.playerStats.away).map((row) => ({ ...row, team: "AWAY" as const })),
+      },
     });
   }
 
@@ -579,11 +581,30 @@ function aggregateSpatialTeam(
   const cells = teams[0].allPlayersHeatmap.length;
   const allPlayersHeatmap = Array(cells).fill(0) as number[];
   const positionHeatmaps: Partial<Record<Position, number[]>> = {};
+  const playerHeatmaps: Record<number, number[]> = {};
+  const sliceKeys: SpatialSliceKey[] = ["ALL", "FIRST_HALF", "SECOND_HALF", "IN_POSSESSION", "OUT_OF_POSSESSION"];
+  const heatmapSlices = Object.fromEntries(sliceKeys.map((key) => [key, {
+    allPlayersHeatmap: Array(cells).fill(0) as number[],
+    playerHeatmaps: {} as Record<number, number[]>,
+  }])) as SpatialTeamAggregate["heatmapSlices"];
 
   for (const team of teams) {
     team.allPlayersHeatmap.forEach((value, index) => {
       allPlayersHeatmap[index] += value;
     });
+    for (const [playerId, values] of Object.entries(team.playerHeatmaps)) {
+      const target = playerHeatmaps[Number(playerId)] ?? (playerHeatmaps[Number(playerId)] = Array(cells).fill(0));
+      values.forEach((value, index) => { target[index] += value; });
+    }
+    for (const key of sliceKeys) {
+      const source = team.heatmapSlices[key];
+      const target = heatmapSlices[key];
+      source.allPlayersHeatmap.forEach((value, index) => { target.allPlayersHeatmap[index] += value; });
+      for (const [playerId, values] of Object.entries(source.playerHeatmaps)) {
+        const playerTarget = target.playerHeatmaps[Number(playerId)] ?? (target.playerHeatmaps[Number(playerId)] = Array(cells).fill(0));
+        values.forEach((value, index) => { playerTarget[index] += value; });
+      }
+    }
 
     for (const [position, values] of Object.entries(team.positionHeatmaps)) {
       const key = position as Position;
@@ -598,6 +619,8 @@ function aggregateSpatialTeam(
 
   return {
     allPlayersHeatmap,
+    playerHeatmaps,
+    heatmapSlices,
     positionHeatmaps,
     averageBlockCenterProgress: averageMetric(teams, "averageBlockCenterProgress"),
     averageBlockDepth: averageMetric(teams, "averageBlockDepth"),

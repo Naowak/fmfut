@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   MonteCarloResponse,
+  PlayerDecisionProfile,
   SensitivityResult,
   SpatialTeamAggregate,
 } from "@/lib/analytics/types";
-import type { Position } from "@/lib/game/types";
+import type { Position, SpatialSliceKey } from "@/lib/game/types";
 import { positionShortLabel } from "@/lib/game/localization";
 import type { SquadOpponent } from "@/lib/squad/api-types";
 
@@ -29,12 +30,13 @@ const HEATMAP_POSITIONS: Array<"ALL" | Position> = [
 export function AnalyticsDashboard() {
   const [runs, setRuns] = useState(50);
   const [seedPrefix, setSeedPrefix] = useState("balance-v07");
-  const [sensitivity, setSensitivity] = useState(true);
   const [data, setData] = useState<MonteCarloResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [heatmapTeam, setHeatmapTeam] = useState<"HOME" | "AWAY">("HOME");
   const [heatmapPosition, setHeatmapPosition] = useState<"ALL" | Position>("ALL");
+  const [heatmapPlayerId, setHeatmapPlayerId] = useState("");
+  const [heatmapSlice, setHeatmapSlice] = useState<SpatialSliceKey>("ALL");
   const [teams, setTeams] = useState<SquadOpponent[]>([]);
   const [homeId, setHomeId] = useState("france-2026");
   const [awayId, setAwayId] = useState("argentina-2026");
@@ -65,7 +67,6 @@ export function AnalyticsDashboard() {
         body: JSON.stringify({
           runs,
           seedPrefix,
-          sensitivity,
           home: homeTeam?.selection,
           away: awayTeam?.selection,
         }),
@@ -101,16 +102,24 @@ export function AnalyticsDashboard() {
 
   const selectedHeatmap = useMemo(() => {
     if (!selectedSpatialTeam) return [];
+    const slice = selectedSpatialTeam.heatmapSlices[heatmapSlice];
+    if (heatmapPlayerId) return slice.playerHeatmaps[Number(heatmapPlayerId)] ?? [];
+    if (heatmapSlice !== "ALL") return slice.allPlayersHeatmap;
     return heatmapPosition === "ALL"
       ? selectedSpatialTeam.allPlayersHeatmap
       : selectedSpatialTeam.positionHeatmaps[heatmapPosition] ?? [];
-  }, [heatmapPosition, selectedSpatialTeam]);
+  }, [heatmapPlayerId, heatmapPosition, heatmapSlice, selectedSpatialTeam]);
+
+  const spatialPlayers = useMemo(
+    () => data?.individual.filter((player) => player.team === heatmapTeam) ?? [],
+    [data, heatmapTeam],
+  );
 
   return (
     <div className="analytics-shell">
       <section className="card analytics-controls">
-        <TeamSelect id="lab-home" label="Équipe à domicile" value={homeId} onChange={(value) => { setHomeId(value); setData(null); }} teams={teams} disabledValue={awayId} />
-        <TeamSelect id="lab-away" label="Équipe à l’extérieur" value={awayId} onChange={(value) => { setAwayId(value); setData(null); }} teams={teams} disabledValue={homeId} />
+        <TeamSelect id="lab-home" label="Équipe 1" value={homeId} onChange={(value) => { setHomeId(value); setData(null); }} teams={teams} disabledValue={awayId} />
+        <TeamSelect id="lab-away" label="Équipe 2" value={awayId} onChange={(value) => { setAwayId(value); setData(null); }} teams={teams} disabledValue={homeId} />
         <div className="field-group">
           <label htmlFor="runs">Nombre de matchs</label>
           <input
@@ -134,15 +143,6 @@ export function AnalyticsDashboard() {
           />
         </div>
 
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={sensitivity}
-            onChange={(event) => setSensitivity(event.target.checked)}
-          />
-          Mesurer la sensibilité des 6 stats et des rôles
-        </label>
-
         <button
           type="button"
           className="primary-button"
@@ -159,7 +159,7 @@ export function AnalyticsDashboard() {
         <div ref={resultsRef} className="analytics-results">
           <section className="analytics-kpis">
             <Kpi label="Buts / match" value={data.baseline.averageTotalGoals} />
-            <Kpi label="Victoire domicile" value={`${data.baseline.homeWinRate}%`} />
+            <Kpi label="Victoire équipe 1" value={`${data.baseline.homeWinRate}%`} />
             <Kpi label="Nuls" value={`${data.baseline.drawRate}%`} />
             <Kpi label="Durée analyse" value={`${data.durationMs} ms`} />
           </section>
@@ -170,8 +170,8 @@ export function AnalyticsDashboard() {
               <thead>
                 <tr>
                   <th>Métrique</th>
-                  <th>{homeTeam ? `${homeTeam.flag} ${homeTeam.name}` : "Domicile"}</th>
-                  <th>{awayTeam ? `${awayTeam.flag} ${awayTeam.name}` : "Extérieur"}</th>
+                  <th>{homeTeam ? `${homeTeam.flag} ${homeTeam.name}` : "Équipe 1"}</th>
+                  <th>{awayTeam ? `${awayTeam.flag} ${awayTeam.name}` : "Équipe 2"}</th>
                 </tr>
               </thead>
               <tbody>
@@ -211,13 +211,14 @@ export function AnalyticsDashboard() {
                 <div className="heatmap-controls">
                   <select
                     value={heatmapTeam}
-                    onChange={(event) => setHeatmapTeam(event.target.value as "HOME" | "AWAY")}
+                    onChange={(event) => { setHeatmapTeam(event.target.value as "HOME" | "AWAY"); setHeatmapPlayerId(""); }}
                   >
-                    <option value="HOME">{homeTeam ? `${homeTeam.flag} ${homeTeam.name}` : "Domicile"}</option>
-                    <option value="AWAY">{awayTeam ? `${awayTeam.flag} ${awayTeam.name}` : "Extérieur"}</option>
+                    <option value="HOME">{homeTeam ? `${homeTeam.flag} ${homeTeam.name}` : "Équipe 1"}</option>
+                    <option value="AWAY">{awayTeam ? `${awayTeam.flag} ${awayTeam.name}` : "Équipe 2"}</option>
                   </select>
                   <select
                     value={heatmapPosition}
+                    disabled={Boolean(heatmapPlayerId) || heatmapSlice !== "ALL"}
                     onChange={(event) => setHeatmapPosition(event.target.value as "ALL" | Position)}
                   >
                     {HEATMAP_POSITIONS.map((position) => (
@@ -226,6 +227,11 @@ export function AnalyticsDashboard() {
                       </option>
                     ))}
                   </select>
+                  <select value={heatmapPlayerId} onChange={(event) => { setHeatmapPlayerId(event.target.value); if (event.target.value) setHeatmapPosition("ALL"); }} aria-label="Joueur observé">
+                    <option value="">Équipe / poste</option>
+                    {spatialPlayers.map((player) => <option key={player.key} value={player.playerId}>{player.playerName}</option>)}
+                  </select>
+                  <select value={heatmapSlice} onChange={(event) => setHeatmapSlice(event.target.value as SpatialSliceKey)} aria-label="Période ou phase"><option value="ALL">Match complet</option><option value="FIRST_HALF">Première période</option><option value="SECOND_HALF">Seconde période</option><option value="IN_POSSESSION">Avec ballon</option><option value="OUT_OF_POSSESSION">Sans ballon</option></select>
                 </div>
               </div>
 
@@ -254,6 +260,17 @@ export function AnalyticsDashboard() {
               </div>
             </section>
           )}
+
+          <section className="card analytics-section">
+            <h2>Statistiques individuelles</h2>
+            <p className="muted">Moyenne normalisée sur un match complet pour tous les joueurs observés.</p>
+            <div className="table-scroll analytics-player-scroll">
+              <table className="analytics-table analytics-player-table">
+                <thead><tr><th>Joueur</th><th>Équipe</th><th>Poste</th><th>Présences</th><th>Minutes</th><th>Buts</th><th>Passes déc.</th><th>Tirs</th><th>Cadrés</th><th>Touches</th><th>Passes</th><th>Dribbles</th><th>Courses</th><th>Tacles</th><th>Interceptions</th><th>Duels</th><th>Récupérations</th><th>Distance</th><th>Énergie fin</th><th>Fiabilité</th></tr></thead>
+                <tbody>{data.individual.map((player) => <PlayerAnalyticsRow key={player.key} player={player} homeName={homeTeam?.name ?? "Équipe 1"} awayName={awayTeam?.name ?? "Équipe 2"} />)}</tbody>
+              </table>
+            </div>
+          </section>
 
           {data.sensitivity.length > 0 && (
             <section className="card analytics-section">
@@ -405,6 +422,19 @@ function MetricRow({ label, home, away }: { label: string; home: string | number
       <td>{label}</td>
       <td>{home}</td>
       <td>{away}</td>
+    </tr>
+  );
+}
+
+function PlayerAnalyticsRow({ player, homeName, awayName }: { player: PlayerDecisionProfile; homeName: string; awayName: string }) {
+  const average = player.per90;
+  return (
+    <tr>
+      <td>{player.playerName}</td><td>{player.team === "HOME" ? homeName : awayName}</td><td>{positionShortLabel(player.position)}</td>
+      <td>{player.appearances}</td><td>{player.averageMinutes}</td><td>{average.goals}</td><td>{average.assists}</td>
+      <td>{average.shots}</td><td>{average.shotsOnTarget}</td><td>{average.touches}</td><td>{average.passesCompleted}/{average.passesAttempted}</td>
+      <td>{average.dribbles}</td><td>{average.progressiveRuns}</td><td>{average.tackles}</td><td>{average.interceptions}</td>
+      <td>{average.duelsWon}</td><td>{average.possessionRegains}</td><td>{average.distanceCovered}</td><td>{player.averageEnergyEnd}%</td><td>{player.reliability}</td>
     </tr>
   );
 }

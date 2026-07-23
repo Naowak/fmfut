@@ -33,7 +33,7 @@ const startersSchema = z
 export const teamSelectionSchema = z
   .object({
     name: z.string().trim().min(1).max(80),
-    formationId: z.literal("4-3-3"),
+    formationId: z.enum(["4-3-3", "4-2-3-1", "4-1-4-1"]),
     starters: startersSchema,
     bench: z.array(playerIdSchema).max(12),
     roles: z.record(z.string(), roleSchema).optional(),
@@ -41,6 +41,8 @@ export const teamSelectionSchema = z
       .object({
         blockHeight: z.enum(["LOW", "NORMAL", "HIGH"]),
         buildUp: z.enum(["SHORT", "BALANCED", "DIRECT"]),
+        pressing: z.enum(["CAUTIOUS", "BALANCED", "AGGRESSIVE"]).optional(),
+        width: z.enum(["NARROW", "BALANCED", "WIDE"]).optional(),
       })
       .strict()
       .optional(),

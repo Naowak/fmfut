@@ -2,6 +2,7 @@ import type {
   PlayerCard,
   Position,
   Role,
+  SpatialSliceKey,
   TeamSelection,
 } from "@/lib/game/types";
 
@@ -104,6 +105,24 @@ export interface SquadPlayerAverage {
   energyEnd: number;
 }
 
+export interface SquadSpatialAverage {
+  columns: number;
+  rows: number;
+  team: SquadSpatialSide;
+  opponent: SquadSpatialSide;
+}
+
+export interface SquadSpatialSide {
+  allPlayersHeatmap: number[];
+  playerHeatmaps: Record<number, number[]>;
+  heatmapSlices: Record<SpatialSliceKey, { allPlayersHeatmap: number[]; playerHeatmaps: Record<number, number[]> }>;
+  averageBlockCenterProgress: number;
+  averageBlockDepth: number;
+  averageBlockWidth: number;
+  averagePlayersInAttackingHalf: number;
+  averageDefensiveLineProgress: number;
+}
+
 export interface SquadPreviewResponse {
   runs: number;
   teamName: string;
@@ -126,6 +145,7 @@ export interface SquadPreviewResponse {
     home: SquadPlayerAverage[];
     away: SquadPlayerAverage[];
   };
+  spatial: SquadSpatialAverage | null;
   reliability: "LOW" | "MEDIUM" | "HIGH";
 }
 

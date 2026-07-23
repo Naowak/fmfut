@@ -1,4 +1,4 @@
-import type { FormationSlot, TeamSide, Vec2 } from "./types";
+import type { FormationId, FormationSlot, TeamSide, Vec2 } from "./types";
 
 export const FORMATION_433: FormationSlot[] = [
   { id: "GK", position: "GK", anchor: { x: 0.055, y: 0.50 }, neighbors: ["LCB", "RCB"] },
@@ -17,10 +17,50 @@ export const FORMATION_433: FormationSlot[] = [
   { id: "RW", position: "RW", anchor: { x: 0.70, y: 0.82 }, neighbors: ["RB", "RCM", "ST"] },
 ];
 
+export const FORMATION_4231: FormationSlot[] = [
+  { id: "GK", position: "GK", anchor: { x: 0.055, y: 0.50 }, neighbors: ["LCB", "RCB"] },
+  { id: "LB", position: "LB", anchor: { x: 0.20, y: 0.16 }, neighbors: ["LCB", "LCM", "LW"] },
+  { id: "LCB", position: "CB", anchor: { x: 0.17, y: 0.37 }, neighbors: ["GK", "LB", "RCB", "CDM"] },
+  { id: "RCB", position: "CB", anchor: { x: 0.17, y: 0.63 }, neighbors: ["GK", "RB", "LCB", "LCM"] },
+  { id: "RB", position: "RB", anchor: { x: 0.20, y: 0.84 }, neighbors: ["RCB", "CDM", "RW"] },
+  { id: "CDM", position: "CDM", anchor: { x: 0.36, y: 0.39 }, neighbors: ["LCB", "RB", "LCM", "RCM"] },
+  { id: "LCM", position: "CDM", anchor: { x: 0.36, y: 0.61 }, neighbors: ["RCB", "LB", "CDM", "RCM"] },
+  { id: "RCM", position: "CAM", anchor: { x: 0.55, y: 0.50 }, neighbors: ["CDM", "LCM", "LW", "ST", "RW"] },
+  { id: "LW", position: "LW", anchor: { x: 0.67, y: 0.18 }, neighbors: ["LB", "RCM", "ST"] },
+  { id: "ST", position: "ST", anchor: { x: 0.76, y: 0.50 }, neighbors: ["RCM", "LW", "RW"] },
+  { id: "RW", position: "RW", anchor: { x: 0.67, y: 0.82 }, neighbors: ["RB", "RCM", "ST"] },
+];
+
+export const FORMATION_4141: FormationSlot[] = [
+  ...FORMATION_433.slice(0, 5),
+  { id: "CDM", position: "CDM", anchor: { x: 0.34, y: 0.50 }, neighbors: ["LCB", "RCB", "LCM", "RCM"] },
+  { id: "LCM", position: "CM", anchor: { x: 0.52, y: 0.36 }, neighbors: ["LB", "CDM", "RCM", "LW", "ST"] },
+  { id: "RCM", position: "CM", anchor: { x: 0.52, y: 0.64 }, neighbors: ["RB", "CDM", "LCM", "RW", "ST"] },
+  { id: "LW", position: "LM", anchor: { x: 0.51, y: 0.13 }, neighbors: ["LB", "LCM", "ST"] },
+  { id: "ST", position: "ST", anchor: { x: 0.75, y: 0.50 }, neighbors: ["LCM", "RCM", "LW", "RW"] },
+  { id: "RW", position: "RM", anchor: { x: 0.51, y: 0.87 }, neighbors: ["RB", "RCM", "ST"] },
+];
+
+export const FORMATIONS: Record<FormationId, FormationSlot[]> = {
+  "4-3-3": FORMATION_433,
+  "4-2-3-1": FORMATION_4231,
+  "4-1-4-1": FORMATION_4141,
+};
+
+export const FORMATION_LABELS: Record<FormationId, string> = {
+  "4-3-3": "4-3-3",
+  "4-2-3-1": "4-2-3-1",
+  "4-1-4-1": "4-1-4-1",
+};
+
+export function getFormation(formationId?: FormationId | string): FormationSlot[] {
+  return FORMATIONS[formationId as FormationId] ?? FORMATION_433;
+}
+
 export const FORMATION_SLOT_IDS = FORMATION_433.map((slot) => slot.id);
 
-export function getSlot(slotId: string): FormationSlot {
-  const slot = FORMATION_433.find((candidate) => candidate.id === slotId);
+export function getSlot(slotId: string, formationId: FormationId = "4-3-3"): FormationSlot {
+  const slot = getFormation(formationId).find((candidate) => candidate.id === slotId);
   if (!slot) {
     throw new Error(`Slot de formation inconnu: ${slotId}`);
   }

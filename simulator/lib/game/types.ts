@@ -20,6 +20,7 @@ export type Role =
   | "PRESSING";
 
 export type TeamSide = "HOME" | "AWAY";
+export type FormationId = "4-3-3" | "4-2-3-1" | "4-1-4-1";
 
 export interface Vec2 {
   x: number;
@@ -54,13 +55,15 @@ export interface FormationSlot {
 
 export interface TeamSelection {
   name: string;
-  formationId: "4-3-3";
+  formationId: FormationId;
   starters: Record<string, number>;
   bench: number[];
   roles?: Partial<Record<string, Role>>;
   tactics?: {
     blockHeight: "LOW" | "NORMAL" | "HIGH";
     buildUp: "SHORT" | "BALANCED" | "DIRECT";
+    pressing?: "CAUTIOUS" | "BALANCED" | "AGGRESSIVE";
+    width?: "NARROW" | "BALANCED" | "WIDE";
   };
 }
 
@@ -221,6 +224,8 @@ export interface PlayerMatchStats {
 export interface TeamSpatialAnalytics {
   samples: number;
   allPlayersHeatmap: number[];
+  playerHeatmaps: Record<number, number[]>;
+  heatmapSlices: Record<SpatialSliceKey, SpatialHeatmapAnalytics>;
   positionHeatmaps: Partial<Record<Position, number[]>>;
   averageBlockCenterProgress: number;
   averageBlockDepth: number;
@@ -233,6 +238,13 @@ export interface TeamSpatialAnalytics {
   averageWidthOutOfPossession: number;
   blockCenterRange: number;
   blockCenterStdDev: number;
+}
+
+export type SpatialSliceKey = "ALL" | "FIRST_HALF" | "SECOND_HALF" | "IN_POSSESSION" | "OUT_OF_POSSESSION";
+
+export interface SpatialHeatmapAnalytics {
+  allPlayersHeatmap: number[];
+  playerHeatmaps: Record<number, number[]>;
 }
 
 export interface MatchSpatialAnalytics {

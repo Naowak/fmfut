@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { positionShortLabel, roleLabel } from "@/lib/game/localization";
+import type { SpatialSliceKey } from "@/lib/game/types";
 import type {
   SquadOpponent,
   SquadPlayerAverage,
@@ -49,11 +50,13 @@ export function SquadTestLab() {
   const [workspace, setWorkspace] = useState<SquadWorkspace>(() => emptyWorkspace());
   const [teamId, setTeamId] = useState("");
   const [strategyId, setStrategyId] = useState("");
+  const [compareStrategyId, setCompareStrategyId] = useState("");
   const [opponents, setOpponents] = useState<SquadOpponent[]>([]);
   const [opponentId, setOpponentId] = useState("");
   const [runs, setRuns] = useState(30);
   const [seedPrefix, setSeedPrefix] = useState("equipe-2026");
   const [result, setResult] = useState<SquadPreviewResponse | null>(null);
+  const [comparison, setComparison] = useState<SquadPreviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -101,22 +104,32 @@ export function SquadTestLab() {
     setRunning(true);
     setError(null);
     setResult(null);
+    setComparison(null);
     try {
-      const response = await fetch("/api/squad/preview", {
+      const requestPreview = async (strategyDraft: SquadDraft, suffix = "") => {
+        const response = await fetch("/api/squad/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          team: toTeamSelection(draft),
+          team: toTeamSelection(strategyDraft),
           opponent: opponent.selection,
           runs,
-          seedPrefix,
+          seedPrefix: `${seedPrefix}${suffix}`,
         }),
       });
-      const payload = (await response.json()) as SquadPreviewResponse | { error: string };
-      if (!response.ok || "error" in payload) {
+        const payload = (await response.json()) as SquadPreviewResponse | { error: string };
+        if (!response.ok || "error" in payload) {
         throw new Error("error" in payload ? payload.error : "Tests impossibles.");
-      }
+        }
+        return payload;
+      };
+      const compareDraft = selectedTeam?.strategies.find((item) => item.id === compareStrategyId)?.draft;
+      const [payload, comparisonPayload] = await Promise.all([
+        requestPreview(draft),
+        compareDraft ? requestPreview(compareDraft) : Promise.resolve(null),
+      ]);
       setResult(payload);
+      setComparison(comparisonPayload);
       window.setTimeout(() => scrollToPanel(reportRef.current), 80);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Tests impossibles.");
@@ -134,7 +147,8 @@ export function SquadTestLab() {
     <div className="squad-test-screen">
       <section className="card squad-test-controls">
         <label>Équipe<select value={teamId} onChange={(event) => { const team = workspace.teams.find((item) => item.id === event.target.value); setTeamId(event.target.value); setStrategyId(team?.strategies[0]?.id ?? ""); setResult(null); }}>{workspace.teams.map((team) => <option key={team.id} value={team.id}>{team.emblem} {team.name}</option>)}</select></label>
-        <label>Stratégie<select value={strategyId} onChange={(event) => { setStrategyId(event.target.value); setResult(null); }}>{selectedTeam?.strategies.map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.name}</option>)}</select></label>
+        <label>Stratégie<select value={strategyId} onChange={(event) => { setStrategyId(event.target.value); if (event.target.value === compareStrategyId) setCompareStrategyId(""); setResult(null); }}>{selectedTeam?.strategies.map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.emblem} {strategy.name}</option>)}</select></label>
+        <label>Comparer à<select value={compareStrategyId} onChange={(event) => { setCompareStrategyId(event.target.value); setResult(null); }}><option value="">Aucune</option>{selectedTeam?.strategies.filter((strategy) => strategy.id !== strategyId).map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.emblem} {strategy.name}</option>)}</select></label>
         <label>Adversaire<select value={opponentId} onChange={(event) => { setOpponentId(event.target.value); setResult(null); }}>{opponents.map((item) => <option key={item.id} value={item.id}>{item.flag} {item.name}</option>)}</select></label>
         <label>Nombre de matchs<select value={runs} onChange={(event) => { setRuns(Number(event.target.value)); setResult(null); }}><option value={10}>10</option><option value={30}>30</option><option value={50}>50</option><option value={100}>100</option></select></label>
         <label>Seed<input className="text-input" value={seedPrefix} maxLength={80} onChange={(event) => { setSeedPrefix(event.target.value); setResult(null); }} /></label>
@@ -144,7 +158,7 @@ export function SquadTestLab() {
 
       {error && <div className="error-box">{error}</div>}
       {result && (
-        <div className="squad-test-report-anchor" ref={reportRef}><SquadTestReport result={result} /></div>
+        <div className="squad-test-report-anchor" ref={reportRef}><SquadTestReport result={result} comparison={comparison} comparisonName={selectedTeam?.strategies.find((item) => item.id === compareStrategyId)?.name} /></div>
       )}
     </div>
   );
@@ -155,7 +169,7 @@ function scrollToPanel(element: HTMLElement | null) {
   window.scrollTo(0, window.scrollY + element.getBoundingClientRect().top - 58);
 }
 
-function SquadTestReport({ result }: { result: SquadPreviewResponse }) {
+function SquadTestReport({ result, comparison, comparisonName }: { result: SquadPreviewResponse; comparison: SquadPreviewResponse | null; comparisonName?: string }) {
   return (
     <div className="squad-test-report">
       <section className="squad-test-outcomes">
@@ -164,6 +178,20 @@ function SquadTestReport({ result }: { result: SquadPreviewResponse }) {
         <Outcome label="Défaite" value={result.outcomes.awayWinRate} />
         <Outcome label="Fiabilité" value={result.reliability} />
       </section>
+
+      {comparison && (
+        <section className="card strategy-comparison-card">
+          <h2>Comparaison avec {comparisonName}</h2>
+          <div className="strategy-comparison-grid">
+            <Outcome label="Écart de victoires" value={`${signed(result.outcomes.homeWinRate - comparison.outcomes.homeWinRate)} pts`} />
+            <Outcome label="Écart de buts" value={signed(result.home.goals - comparison.home.goals)} />
+            <Outcome label="Écart de tirs" value={signed(result.home.shots - comparison.home.shots)} />
+            <Outcome label="Écart de possession" value={`${signed(result.home.possession - comparison.home.possession)} pts`} />
+          </div>
+        </section>
+      )}
+
+      {result.spatial && <SquadSpatialExplorer result={result} />}
 
       <section className="card squad-test-section">
         <div className="squad-report-heading"><div><span className="config-kicker">{result.runs} SIMULATIONS</span><h2>Statistiques collectives</h2><p>Moyenne par match contre {result.opponentName}.</p></div></div>
@@ -197,6 +225,74 @@ function SquadTestReport({ result }: { result: SquadPreviewResponse }) {
   );
 }
 
+function SquadSpatialExplorer({ result }: { result: SquadPreviewResponse }) {
+  const [side, setSide] = useState<"team" | "opponent">("team");
+  const [playerId, setPlayerId] = useState("team");
+  const [comparePlayerId, setComparePlayerId] = useState("");
+  const [slice, setSlice] = useState<SpatialSliceKey>("ALL");
+  const players = side === "team" ? result.players.home : result.players.away;
+  const spatial = result.spatial![side];
+  const selectedPlayer = playerId === "team" ? null : players.find((player) => player.playerId === Number(playerId)) ?? null;
+  const sliceData = spatial.heatmapSlices[slice];
+  const values = selectedPlayer ? sliceData.playerHeatmaps[selectedPlayer.playerId] ?? [] : sliceData.allPlayersHeatmap;
+  const comparedPlayer = playerId !== "team" && comparePlayerId ? players.find((player) => player.playerId === Number(comparePlayerId)) ?? null : null;
+  const comparedValues = comparedPlayer ? sliceData.playerHeatmaps[comparedPlayer.playerId] ?? [] : [];
+  const max = Math.max(...values, 1);
+  const comparedMax = Math.max(...comparedValues, 1);
+  const team = side === "team" ? result.home : result.away;
+  const name = side === "team" ? result.teamName : result.opponentName;
+  const metrics = selectedPlayer
+    ? [
+        ["Minutes", selectedPlayer.minutesPlayed], ["Distance", `${selectedPlayer.distanceCovered} km`],
+        ["Touches", selectedPlayer.touches], ["Buts", selectedPlayer.goals], ["Passes déc.", selectedPlayer.assists],
+        ["Tirs", selectedPlayer.shots], ["Passes réussies", selectedPlayer.passesCompleted],
+        ["Récupérations", selectedPlayer.possessionRegains], ["Interceptions", selectedPlayer.interceptions],
+        ["Duels gagnés", selectedPlayer.duelsWon], ["Énergie finale", `${selectedPlayer.energyEnd}%`],
+      ]
+    : [
+        ["Possession", `${team.possession}%`], ["Buts", team.goals], ["Tirs", team.shots],
+        ["Passes réussies", team.passesCompleted], ["Récupérations", team.possessionRegains],
+        ["Duels gagnés", team.duelsWon], ["Largeur du bloc", `${Math.round(spatial.averageBlockWidth * 100)}%`],
+        ["Hauteur du bloc", `${Math.round(spatial.averageBlockCenterProgress * 100)}%`],
+        ["Joueurs dans le camp adverse", spatial.averagePlayersInAttackingHalf],
+      ];
+
+  return (
+    <section className="card squad-test-section squad-spatial-section">
+      <div className="squad-spatial-controls">
+        <div className="segmented-control" aria-label="Équipe observée">
+          <button type="button" aria-pressed={side === "team"} onClick={() => { setSide("team"); setPlayerId("team"); }}>{result.teamName}</button>
+          <button type="button" aria-pressed={side === "opponent"} onClick={() => { setSide("opponent"); setPlayerId("team"); }}>{result.opponentName}</button>
+        </div>
+        <label>Observation<select value={playerId} onChange={(event) => setPlayerId(event.target.value)}>
+          <option value="team">Équipe complète</option>
+          {players.map((player) => <option key={player.playerId} value={player.playerId}>{player.playerName}</option>)}
+        </select></label>
+        <label>Période / phase<select value={slice} onChange={(event) => setSlice(event.target.value as SpatialSliceKey)}><option value="ALL">Match complet</option><option value="FIRST_HALF">Première période</option><option value="SECOND_HALF">Seconde période</option><option value="IN_POSSESSION">Avec ballon</option><option value="OUT_OF_POSSESSION">Sans ballon</option></select></label>
+        <label>Comparer un joueur<select value={comparePlayerId} disabled={playerId === "team"} onChange={(event) => setComparePlayerId(event.target.value)}><option value="">Aucun</option>{players.filter((player) => String(player.playerId) !== playerId).map((player) => <option key={player.playerId} value={player.playerId}>{player.playerName}</option>)}</select></label>
+      </div>
+      <div className="squad-spatial-layout">
+        <div className="squad-heatmap-pitch" style={{ gridTemplateColumns: `repeat(${result.spatial!.columns}, 1fr)`, gridTemplateRows: `repeat(${result.spatial!.rows}, 1fr)` }} aria-label={`Occupation moyenne — ${selectedPlayer?.playerName ?? name}`}>
+          {Array.from({ length: result.spatial!.columns * result.spatial!.rows }, (_, index) => {
+            const intensity = (values[index] ?? 0) / max;
+            const comparedIntensity = (comparedValues[index] ?? 0) / comparedMax;
+            const background = comparedPlayer
+              ? `linear-gradient(135deg, rgba(234,112,20,${0.05 + intensity * .9}) 0 50%, rgba(37,99,235,${0.05 + comparedIntensity * .9}) 50% 100%)`
+              : `rgba(234, 112, 20, ${0.06 + intensity * 0.88})`;
+            return <span key={index} style={{ background }} />;
+          })}
+          <i className="heatmap-halfway" /><i className="heatmap-circle" /><i className="heatmap-box heatmap-box-top" /><i className="heatmap-box heatmap-box-bottom" />
+        </div>
+        <div className="squad-spatial-stats">
+          <div><span>Occupation moyenne</span><strong>{selectedPlayer?.playerName ?? name}</strong></div>
+          {comparedPlayer && <div className="spatial-comparison-legend"><span>Comparaison</span><strong>Orange : {selectedPlayer?.playerName} · Bleu : {comparedPlayer.playerName}</strong></div>}
+          {metrics.map(([label, value]) => <div key={String(label)}><span>{label}</span><strong>{value}</strong></div>)}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function PlayerReportTable({ players }: { players: SquadPlayerAverage[] }) {
   return (
     <div className="table-scroll player-table-scroll">
@@ -218,6 +314,11 @@ function Outcome({ label, value }: { label: string; value: string | number }) {
 
 function formatValue(value: number, suffix = "") {
   return `${value}${suffix}`;
+}
+
+function signed(value: number) {
+  const rounded = Math.round(value * 100) / 100;
+  return `${rounded >= 0 ? "+" : ""}${rounded}`;
 }
 
 function distributionLabel(key: string) {

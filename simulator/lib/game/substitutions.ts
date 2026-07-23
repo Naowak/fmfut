@@ -117,7 +117,7 @@ export function recomputeSynergy(team: RuntimeTeam): void {
       continue;
     }
 
-    const slot = getSlot(player.slotId);
+    const slot = getSlot(player.slotId, player.formationId);
     const matchingNeighbors = slot.neighbors
       .map((neighborId) => bySlot.get(neighborId))
       .filter(

@@ -1,4 +1,4 @@
-import type { Position, TeamSide } from "@/lib/game/types";
+import type { Position, SpatialSliceKey, TeamSide } from "@/lib/game/types";
 
 export const ANALYZED_STATS = [
   "speed",
@@ -72,6 +72,8 @@ export interface MonteCarloAggregate {
 
 export interface SpatialTeamAggregate {
   allPlayersHeatmap: number[];
+  playerHeatmaps: Record<number, number[]>;
+  heatmapSlices: Record<SpatialSliceKey, { allPlayersHeatmap: number[]; playerHeatmaps: Record<number, number[]> }>;
   positionHeatmaps: Partial<Record<Position, number[]>>;
   averageBlockCenterProgress: number;
   averageBlockDepth: number;
