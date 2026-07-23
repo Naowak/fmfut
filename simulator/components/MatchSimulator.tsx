@@ -2,28 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { PitchCanvas } from "./PitchCanvas";
+import { MatchLineupPreview } from "./MatchLineupPreview";
 import type { MatchSimulationOutput } from "@/lib/game/types";
 import type { SquadOpponent } from "@/lib/squad/api-types";
-
-const TEAM_COLORS = [
-  { label: "Bleu", value: "#2563eb" },
-  { label: "Rouge", value: "#dc2626" },
-  { label: "Orange", value: "#ea580c" },
-  { label: "Jaune", value: "#eab308" },
-  { label: "Vert", value: "#16a34a" },
-  { label: "Violet", value: "#9333ea" },
-  { label: "Cyan", value: "#0891b2" },
-  { label: "Blanc", value: "#f8fafc" },
-];
+import { usePersistentScreenState } from "@/lib/client/persistent-screen-state";
 
 export function MatchSimulator() {
-  const [seed, setSeed] = useState("partie-rapide-42");
+  const [seed, setSeed] = usePersistentScreenState("fmfut:quick:seed", "partie-rapide-42");
   const [teams, setTeams] = useState<SquadOpponent[]>([]);
-  const [homeId, setHomeId] = useState("france-2026");
-  const [awayId, setAwayId] = useState("argentina-2026");
-  const [homeColor, setHomeColor] = useState("#2563eb");
-  const [awayColor, setAwayColor] = useState("#dc2626");
-  const [match, setMatch] = useState<MatchSimulationOutput | null>(null);
+  const [homeId, setHomeId] = usePersistentScreenState("fmfut:quick:first-team", "france-2026");
+  const [awayId, setAwayId] = usePersistentScreenState("fmfut:quick:second-team", "argentina-2026");
+  const [match, setMatch] = usePersistentScreenState<MatchSimulationOutput | null>("fmfut:quick:result", null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const viewerRef = useRef<HTMLDivElement | null>(null);
@@ -42,6 +31,10 @@ export function MatchSimulator() {
 
   const home = teams.find((team) => team.id === homeId) ?? null;
   const away = teams.find((team) => team.id === awayId) ?? null;
+  const homeColor = home?.primaryColor ?? "#2563eb";
+  const awayColor = away
+    ? (away.primaryColor === homeColor ? away.secondaryColor : away.primaryColor)
+    : "#dc2626";
 
   async function runSimulation() {
     setLoading(true);
@@ -94,22 +87,6 @@ export function MatchSimulator() {
             />
           </div>
 
-          <ColorSelect
-            id="home-color"
-            label={`Couleur ${home?.name ?? "équipe"}`}
-            value={homeColor}
-            onChange={setHomeColor}
-            disabledValue={awayColor}
-          />
-
-          <ColorSelect
-            id="away-color"
-            label={`Couleur ${away?.name ?? "équipe"}`}
-            value={awayColor}
-            onChange={setAwayColor}
-            disabledValue={homeColor}
-          />
-
           <button
             type="button"
             className="primary-button"
@@ -135,6 +112,13 @@ export function MatchSimulator() {
         </div>
 
         {error && <div className="error-box">{error}</div>}
+
+        {!match && home && away && (
+          <MatchLineupPreview
+            first={{ name: home.name, badge: home.flag, color: homeColor, selection: home.selection, players: home.players }}
+            second={{ name: away.name, badge: away.flag, color: awayColor, selection: away.selection, players: away.players }}
+          />
+        )}
 
         {match ? (
           <div className="match-view-anchor" ref={viewerRef}>
@@ -287,40 +271,6 @@ function TeamSelect({
           </option>
         ))}
       </select>
-    </div>
-  );
-}
-
-function ColorSelect({
-  id,
-  label,
-  value,
-  onChange,
-  disabledValue,
-}: {
-  id: string;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  disabledValue: string;
-}) {
-  return (
-    <div className="field-group color-field">
-      <label htmlFor={id}>{label}</label>
-      <div className="color-select-wrap">
-        <span className="color-dot" style={{ background: value }} />
-        <select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
-          {TEAM_COLORS.map((color) => (
-            <option
-              key={color.value}
-              value={color.value}
-              disabled={color.value === disabledValue}
-            >
-              {color.label}
-            </option>
-          ))}
-        </select>
-      </div>
     </div>
   );
 }

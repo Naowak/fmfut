@@ -34,6 +34,7 @@ import {
   nationalityFlag,
   WORLD_CUP_2026_TEAMS,
 } from "@/lib/squad/opponents";
+import { usePersistentScreenState } from "@/lib/client/persistent-screen-state";
 import {
   addPlayerToBench,
   allDraftPlayers,
@@ -70,18 +71,18 @@ export function SquadBuilder() {
   const [draft, setDraft] = useState<SquadDraft>(() => createEmptyDraft());
   const [workspace, setWorkspace] = useState<SquadWorkspace>(() => emptyWorkspace());
   const [hydrated, setHydrated] = useState(false);
-  const [selectedSlot, setSelectedSlot] = useState<SquadSlotId>("ST");
+  const [selectedSlot, setSelectedSlot] = usePersistentScreenState<SquadSlotId>("fmfut:squad:selected-slot", "ST");
   const [candidate, setCandidate] = useState<PlayerCard | null>(null);
-  const [query, setQuery] = useState("");
-  const [position, setPosition] = useState<"" | Position>("");
-  const [nation, setNation] = useState("");
-  const [minOverall, setMinOverall] = useState("");
-  const [page, setPage] = useState(1);
+  const [query, setQuery] = usePersistentScreenState("fmfut:squad:query", "");
+  const [position, setPosition] = usePersistentScreenState<"" | Position>("fmfut:squad:position", "");
+  const [nation, setNation] = usePersistentScreenState("fmfut:squad:nation", "");
+  const [minOverall, setMinOverall] = usePersistentScreenState("fmfut:squad:min-overall", "");
+  const [page, setPage] = usePersistentScreenState("fmfut:squad:page", 1);
   const [search, setSearch] = useState<SearchPayload>({ items: [], page: 1, total: 0, totalPages: 0 });
   const [searchLoading, setSearchLoading] = useState(true);
   const [benchmarks, setBenchmarks] = useState<PositionBenchmarks[]>([]);
   const [message, setMessage] = useState<string | null>(null);
-  const [mobileTab, setMobileTab] = useState<"SEARCH" | "TEAM" | "ANALYSIS">("TEAM");
+  const [mobileTab, setMobileTab] = usePersistentScreenState<"SEARCH" | "TEAM" | "ANALYSIS">("fmfut:squad:mobile-tab", "TEAM");
   const activeTeam = workspace.teams.find((team) => team.id === workspace.activeTeamId) ?? null;
   const activeStrategy = activeTeam?.strategies.find((strategy) => strategy.id === workspace.activeStrategyId) ?? null;
 

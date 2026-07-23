@@ -10,6 +10,7 @@ import type {
 import type { Position, SpatialSliceKey } from "@/lib/game/types";
 import { positionShortLabel } from "@/lib/game/localization";
 import type { SquadOpponent } from "@/lib/squad/api-types";
+import { usePersistentScreenState } from "@/lib/client/persistent-screen-state";
 
 const HEATMAP_POSITIONS: Array<"ALL" | Position> = [
   "ALL",
@@ -28,18 +29,18 @@ const HEATMAP_POSITIONS: Array<"ALL" | Position> = [
 ];
 
 export function AnalyticsDashboard() {
-  const [runs, setRuns] = useState(50);
-  const [seedPrefix, setSeedPrefix] = useState("balance-v07");
-  const [data, setData] = useState<MonteCarloResponse | null>(null);
+  const [runs, setRuns] = usePersistentScreenState("fmfut:lab:runs", 50);
+  const [seedPrefix, setSeedPrefix] = usePersistentScreenState("fmfut:lab:seed", "balance-v07");
+  const [data, setData] = usePersistentScreenState<MonteCarloResponse | null>("fmfut:lab:result", null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [heatmapTeam, setHeatmapTeam] = useState<"HOME" | "AWAY">("HOME");
-  const [heatmapPosition, setHeatmapPosition] = useState<"ALL" | Position>("ALL");
-  const [heatmapPlayerId, setHeatmapPlayerId] = useState("");
-  const [heatmapSlice, setHeatmapSlice] = useState<SpatialSliceKey>("ALL");
+  const [heatmapTeam, setHeatmapTeam] = usePersistentScreenState<"HOME" | "AWAY">("fmfut:lab:heatmap-team", "HOME");
+  const [heatmapPosition, setHeatmapPosition] = usePersistentScreenState<"ALL" | Position>("fmfut:lab:heatmap-position", "ALL");
+  const [heatmapPlayerId, setHeatmapPlayerId] = usePersistentScreenState("fmfut:lab:heatmap-player", "");
+  const [heatmapSlice, setHeatmapSlice] = usePersistentScreenState<SpatialSliceKey>("fmfut:lab:heatmap-slice", "ALL");
   const [teams, setTeams] = useState<SquadOpponent[]>([]);
-  const [homeId, setHomeId] = useState("france-2026");
-  const [awayId, setAwayId] = useState("argentina-2026");
+  const [homeId, setHomeId] = usePersistentScreenState("fmfut:lab:first-team", "france-2026");
+  const [awayId, setAwayId] = usePersistentScreenState("fmfut:lab:second-team", "argentina-2026");
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const homeTeam = teams.find((team) => team.id === homeId) ?? null;
   const awayTeam = teams.find((team) => team.id === awayId) ?? null;

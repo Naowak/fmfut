@@ -72,6 +72,33 @@ const ROLES: Partial<Record<string, Role>> = {
 };
 const BENCH_POSITIONS: Position[] = ["GK", "CB", "LB", "RB", "CM", "LW", "ST"];
 
+const NATIONAL_TEAM_COLORS: Record<string, readonly [string, string]> = {
+  "canada-2026": ["#dc2626", "#f8fafc"], "mexico-2026": ["#15803d", "#dc2626"],
+  "united-states-2026": ["#1d4ed8", "#f8fafc"], "australia-2026": ["#eab308", "#166534"],
+  "iraq-2026": ["#15803d", "#f8fafc"], "iran-2026": ["#f8fafc", "#dc2626"],
+  "japan-2026": ["#1d4ed8", "#f8fafc"], "jordan-2026": ["#f8fafc", "#dc2626"],
+  "korea-republic-2026": ["#dc2626", "#f8fafc"], "qatar-2026": ["#881337", "#f8fafc"],
+  "saudi-arabia-2026": ["#15803d", "#f8fafc"], "uzbekistan-2026": ["#2563eb", "#f8fafc"],
+  "algeria-2026": ["#f8fafc", "#15803d"], "cabo-verde-2026": ["#1d4ed8", "#f8fafc"],
+  "congo-dr-2026": ["#2563eb", "#dc2626"], "cote-divoire-2026": ["#ea580c", "#f8fafc"],
+  "egypt-2026": ["#dc2626", "#f8fafc"], "ghana-2026": ["#f8fafc", "#eab308"],
+  "morocco-2026": ["#dc2626", "#15803d"], "senegal-2026": ["#f8fafc", "#15803d"],
+  "south-africa-2026": ["#eab308", "#15803d"], "tunisia-2026": ["#f8fafc", "#dc2626"],
+  "curacao-2026": ["#2563eb", "#eab308"], "haiti-2026": ["#1d4ed8", "#dc2626"],
+  "panama-2026": ["#dc2626", "#f8fafc"], "argentina-2026": ["#38bdf8", "#f8fafc"],
+  "brazil-2026": ["#eab308", "#2563eb"], "colombia-2026": ["#eab308", "#1d4ed8"],
+  "ecuador-2026": ["#eab308", "#1d4ed8"], "paraguay-2026": ["#f8fafc", "#dc2626"],
+  "uruguay-2026": ["#38bdf8", "#111827"], "new-zealand-2026": ["#111827", "#f8fafc"],
+  "austria-2026": ["#dc2626", "#f8fafc"], "belgium-2026": ["#dc2626", "#111827"],
+  "bosnia-herzegovina-2026": ["#1d4ed8", "#eab308"], "croatia-2026": ["#f8fafc", "#dc2626"],
+  "czechia-2026": ["#f8fafc", "#dc2626"], "england-2026": ["#f8fafc", "#1d4ed8"],
+  "france-2026": ["#1d4ed8", "#f8fafc"], "germany-2026": ["#f8fafc", "#111827"],
+  "netherlands-2026": ["#ea580c", "#1d4ed8"], "norway-2026": ["#dc2626", "#f8fafc"],
+  "portugal-2026": ["#dc2626", "#15803d"], "scotland-2026": ["#1d4ed8", "#f8fafc"],
+  "spain-2026": ["#dc2626", "#eab308"], "sweden-2026": ["#eab308", "#2563eb"],
+  "switzerland-2026": ["#dc2626", "#f8fafc"], "turkiye-2026": ["#dc2626", "#f8fafc"],
+};
+
 export const NEUTRAL_NATIONALITY_FLAG = "🏳️";
 
 export function nationalityFlag(nation: string): string {
@@ -124,6 +151,8 @@ export function createOpponentCatalog(players: PlayerCard[]): SquadOpponent[] {
 
     return {
       ...definition,
+      primaryColor: NATIONAL_TEAM_COLORS[definition.id]?.[0] ?? "#f97316",
+      secondaryColor: NATIONAL_TEAM_COLORS[definition.id]?.[1] ?? "#f8fafc",
       selection,
       players: selectedPlayers,
       syntheticPlayers: generated.length,

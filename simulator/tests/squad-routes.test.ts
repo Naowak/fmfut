@@ -45,6 +45,8 @@ describe("Squad Builder APIs", () => {
       id: string;
       nation: string;
       flag: string;
+      primaryColor: string;
+      secondaryColor: string;
       syntheticPlayers: number;
       selection: typeof DEFAULT_HOME_SELECTION;
       players: Array<{ playerId: number; nationalityName: string; shortName: string }>;
@@ -67,6 +69,9 @@ describe("Squad Builder APIs", () => {
       expect(new Set(ids).size).toBe(18);
       expect(opponent.players).toHaveLength(18);
       expect(opponent.flag.length).toBeGreaterThan(0);
+      expect(opponent.primaryColor).toMatch(/^#[0-9a-f]{6}$/i);
+      expect(opponent.secondaryColor).toMatch(/^#[0-9a-f]{6}$/i);
+      expect(opponent.primaryColor).not.toBe(opponent.secondaryColor);
       expect(opponent.syntheticPlayers).toBe(0);
       expect(opponent.players.some((player) => player.shortName.startsWith("Réserve"))).toBe(false);
       expect(

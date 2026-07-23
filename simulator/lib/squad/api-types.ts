@@ -31,6 +31,8 @@ export interface SquadOpponent {
   nation: string;
   name: string;
   flag: string;
+  primaryColor: string;
+  secondaryColor: string;
   confederation: "AFC" | "CAF" | "Concacaf" | "CONMEBOL" | "OFC" | "UEFA";
   selection: TeamSelection;
   players: PlayerCard[];

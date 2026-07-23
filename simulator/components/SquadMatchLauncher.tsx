@@ -3,20 +3,22 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PitchCanvas } from "./PitchCanvas";
+import { MatchLineupPreview } from "./MatchLineupPreview";
 import { getFormation } from "@/lib/game/formations";
 import { slotLabel } from "@/lib/game/localization";
 import type { MatchSimulationOutput, PlayerCard } from "@/lib/game/types";
 import type { SquadOpponent } from "@/lib/squad/api-types";
 import { diagnoseSquad, toTeamSelection, type SquadDraft } from "@/lib/squad/builder";
 import { emptyWorkspace, loadSquadWorkspace, type SquadWorkspace } from "@/lib/squad/client-storage";
+import { usePersistentScreenState } from "@/lib/client/persistent-screen-state";
 
 export function SquadMatchLauncher() {
   const [workspace, setWorkspace] = useState<SquadWorkspace>(() => emptyWorkspace());
-  const [teamId, setTeamId] = useState("");
-  const [strategyId, setStrategyId] = useState("");
+  const [teamId, setTeamId] = usePersistentScreenState("fmfut:matches:team", "");
+  const [strategyId, setStrategyId] = usePersistentScreenState("fmfut:matches:strategy", "");
   const [opponents, setOpponents] = useState<SquadOpponent[]>([]);
-  const [opponentId, setOpponentId] = useState("");
-  const [match, setMatch] = useState<MatchSimulationOutput | null>(null);
+  const [opponentId, setOpponentId] = usePersistentScreenState("fmfut:matches:opponent", "");
+  const [match, setMatch] = usePersistentScreenState<MatchSimulationOutput | null>("fmfut:matches:result", null);
   const [loading, setLoading] = useState(true);
   const [matchLoading, setMatchLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,10 +40,10 @@ export function SquadMatchLauncher() {
           setWorkspace(loadedWorkspace);
           const team = loadedWorkspace.teams.find((item) => item.id === loadedWorkspace.activeTeamId) ?? loadedWorkspace.teams[0];
           const strategy = team?.strategies.find((item) => item.id === loadedWorkspace.activeStrategyId) ?? team?.strategies[0];
-          setTeamId(team?.id ?? "");
-          setStrategyId(strategy?.id ?? "");
+          setTeamId((current) => loadedWorkspace.teams.some((item) => item.id === current) ? current : (team?.id ?? ""));
+          setStrategyId((current) => loadedWorkspace.teams.some((item) => item.strategies.some((saved) => saved.id === current)) ? current : (strategy?.id ?? ""));
           setOpponents(payload);
-          setOpponentId(payload[0]?.id ?? "");
+          setOpponentId((current) => payload.some((item) => item.id === current) ? current : (payload[0]?.id ?? ""));
         }
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "Chargement impossible.");
@@ -142,6 +144,27 @@ export function SquadMatchLauncher() {
           </button>
         </section>
       </div>
+
+      {!match && draft && opponent && (
+        <section className="card squad-lineup-preview-card">
+          <MatchLineupPreview
+            first={{
+              name: selectedTeam?.name ?? draft.name,
+              badge: selectedTeam?.emblem,
+              color: "#f59e0b",
+              selection: toTeamSelection(draft),
+              players: Object.values(draft.starters).filter((player): player is PlayerCard => Boolean(player)),
+            }}
+            second={{
+              name: opponent.name,
+              badge: opponent.flag,
+              color: opponent.primaryColor,
+              selection: opponent.selection,
+              players: opponent.players,
+            }}
+          />
+        </section>
+      )}
 
       {match && (
         <section className="card squad-replay-card" ref={replayRef}>

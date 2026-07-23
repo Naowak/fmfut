@@ -1,6 +1,6 @@
 {
   "name": "fut-manager-nextjs-simulator",
-  "version": "0.13.1",
+  "version": "0.13.3",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -23,7 +23,7 @@
   "dependencies": {
     "better-sqlite3": "13.0.1",
     "csv-parse": "7.0.1",
-    "next": "16.2.10",
+    "next": "16.2.11",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "zod": "^4.4.3"

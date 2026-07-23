@@ -12,6 +12,7 @@ import type {
 } from "@/lib/squad/api-types";
 import { diagnoseSquad, toTeamSelection, type SquadDraft } from "@/lib/squad/builder";
 import { emptyWorkspace, loadSquadWorkspace, type SquadWorkspace } from "@/lib/squad/client-storage";
+import { usePersistentScreenState } from "@/lib/client/persistent-screen-state";
 
 const TEAM_METRICS: Array<{ key: keyof SquadTeamAverage; label: string; suffix?: string }> = [
   { key: "goals", label: "Buts" },
@@ -48,15 +49,15 @@ const TEAM_METRICS: Array<{ key: keyof SquadTeamAverage; label: string; suffix?:
 
 export function SquadTestLab() {
   const [workspace, setWorkspace] = useState<SquadWorkspace>(() => emptyWorkspace());
-  const [teamId, setTeamId] = useState("");
-  const [strategyId, setStrategyId] = useState("");
-  const [compareStrategyId, setCompareStrategyId] = useState("");
+  const [teamId, setTeamId] = usePersistentScreenState("fmfut:tests:team", "");
+  const [strategyId, setStrategyId] = usePersistentScreenState("fmfut:tests:strategy", "");
+  const [compareStrategyId, setCompareStrategyId] = usePersistentScreenState("fmfut:tests:comparison", "");
   const [opponents, setOpponents] = useState<SquadOpponent[]>([]);
-  const [opponentId, setOpponentId] = useState("");
-  const [runs, setRuns] = useState(30);
-  const [seedPrefix, setSeedPrefix] = useState("equipe-2026");
-  const [result, setResult] = useState<SquadPreviewResponse | null>(null);
-  const [comparison, setComparison] = useState<SquadPreviewResponse | null>(null);
+  const [opponentId, setOpponentId] = usePersistentScreenState("fmfut:tests:opponent", "");
+  const [runs, setRuns] = usePersistentScreenState("fmfut:tests:runs", 30);
+  const [seedPrefix, setSeedPrefix] = usePersistentScreenState("fmfut:tests:seed", "equipe-2026");
+  const [result, setResult] = usePersistentScreenState<SquadPreviewResponse | null>("fmfut:tests:result", null);
+  const [comparison, setComparison] = usePersistentScreenState<SquadPreviewResponse | null>("fmfut:tests:comparison-result", null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,10 +79,10 @@ export function SquadTestLab() {
           setWorkspace(loadedWorkspace);
           const team = loadedWorkspace.teams.find((item) => item.id === loadedWorkspace.activeTeamId) ?? loadedWorkspace.teams[0];
           const strategy = team?.strategies.find((item) => item.id === loadedWorkspace.activeStrategyId) ?? team?.strategies[0];
-          setTeamId(team?.id ?? "");
-          setStrategyId(strategy?.id ?? "");
+          setTeamId((current) => loadedWorkspace.teams.some((item) => item.id === current) ? current : (team?.id ?? ""));
+          setStrategyId((current) => loadedWorkspace.teams.some((item) => item.strategies.some((saved) => saved.id === current)) ? current : (strategy?.id ?? ""));
           setOpponents(payload);
-          setOpponentId(payload[0]?.id ?? "");
+          setOpponentId((current) => payload.some((item) => item.id === current) ? current : (payload[0]?.id ?? ""));
         }
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "Chargement impossible.");
