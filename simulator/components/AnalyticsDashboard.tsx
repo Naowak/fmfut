@@ -118,8 +118,8 @@ export function AnalyticsDashboard() {
   return (
     <div className="analytics-shell">
       <section className="card analytics-controls">
-        <TeamSelect id="lab-home" label="Équipe 1" value={homeId} onChange={(value) => { setHomeId(value); setData(null); }} teams={teams} disabledValue={awayId} />
-        <TeamSelect id="lab-away" label="Équipe 2" value={awayId} onChange={(value) => { setAwayId(value); setData(null); }} teams={teams} disabledValue={homeId} />
+        <TeamSelect id="lab-home" label={homeTeam?.name ?? "Équipe"} value={homeId} onChange={(value) => { setHomeId(value); setData(null); }} teams={teams} />
+        <TeamSelect id="lab-away" label={awayTeam?.name ?? "Équipe"} value={awayId} onChange={(value) => { setAwayId(value); setData(null); }} teams={teams} />
         <div className="field-group">
           <label htmlFor="runs">Nombre de matchs</label>
           <input
@@ -147,7 +147,7 @@ export function AnalyticsDashboard() {
           type="button"
           className="primary-button"
           onClick={runAnalysis}
-          disabled={loading || !homeTeam || !awayTeam || homeId === awayId}
+          disabled={loading || !homeTeam || !awayTeam}
         >
           {loading ? "Simulation en cours…" : "Lancer Monte-Carlo"}
         </button>
@@ -159,7 +159,7 @@ export function AnalyticsDashboard() {
         <div ref={resultsRef} className="analytics-results">
           <section className="analytics-kpis">
             <Kpi label="Buts / match" value={data.baseline.averageTotalGoals} />
-            <Kpi label="Victoire équipe 1" value={`${data.baseline.homeWinRate}%`} />
+            <Kpi label={`Victoire ${homeTeam?.name ?? "équipe"}`} value={`${data.baseline.homeWinRate}%`} />
             <Kpi label="Nuls" value={`${data.baseline.drawRate}%`} />
             <Kpi label="Durée analyse" value={`${data.durationMs} ms`} />
           </section>
@@ -170,8 +170,8 @@ export function AnalyticsDashboard() {
               <thead>
                 <tr>
                   <th>Métrique</th>
-                  <th>{homeTeam ? `${homeTeam.flag} ${homeTeam.name}` : "Équipe 1"}</th>
-                  <th>{awayTeam ? `${awayTeam.flag} ${awayTeam.name}` : "Équipe 2"}</th>
+                  <th>{homeTeam ? `${homeTeam.flag} ${homeTeam.name}` : "Équipe"}</th>
+                  <th>{awayTeam ? `${awayTeam.flag} ${awayTeam.name}` : "Adversaire"}</th>
                 </tr>
               </thead>
               <tbody>
@@ -213,8 +213,8 @@ export function AnalyticsDashboard() {
                     value={heatmapTeam}
                     onChange={(event) => { setHeatmapTeam(event.target.value as "HOME" | "AWAY"); setHeatmapPlayerId(""); }}
                   >
-                    <option value="HOME">{homeTeam ? `${homeTeam.flag} ${homeTeam.name}` : "Équipe 1"}</option>
-                    <option value="AWAY">{awayTeam ? `${awayTeam.flag} ${awayTeam.name}` : "Équipe 2"}</option>
+                    <option value="HOME">{homeTeam ? `${homeTeam.flag} ${homeTeam.name}` : "Équipe"}</option>
+                    <option value="AWAY">{awayTeam ? `${awayTeam.flag} ${awayTeam.name}` : "Adversaire"}</option>
                   </select>
                   <select
                     value={heatmapPosition}
@@ -267,7 +267,7 @@ export function AnalyticsDashboard() {
             <div className="table-scroll analytics-player-scroll">
               <table className="analytics-table analytics-player-table">
                 <thead><tr><th>Joueur</th><th>Équipe</th><th>Poste</th><th>Présences</th><th>Minutes</th><th>Buts</th><th>Passes déc.</th><th>Tirs</th><th>Cadrés</th><th>Touches</th><th>Passes</th><th>Dribbles</th><th>Courses</th><th>Tacles</th><th>Interceptions</th><th>Duels</th><th>Récupérations</th><th>Distance</th><th>Énergie fin</th><th>Fiabilité</th></tr></thead>
-                <tbody>{data.individual.map((player) => <PlayerAnalyticsRow key={player.key} player={player} homeName={homeTeam?.name ?? "Équipe 1"} awayName={awayTeam?.name ?? "Équipe 2"} />)}</tbody>
+                <tbody>{data.individual.map((player) => <PlayerAnalyticsRow key={player.key} player={player} homeName={homeTeam?.name ?? "Équipe"} awayName={awayTeam?.name ?? "Adversaire"} />)}</tbody>
               </table>
             </div>
           </section>
@@ -338,19 +338,18 @@ function scrollToPanel(element: HTMLElement | null) {
   window.scrollTo(0, window.scrollY + element.getBoundingClientRect().top - 58);
 }
 
-function TeamSelect({ id, label, value, onChange, teams, disabledValue }: {
+function TeamSelect({ id, label, value, onChange, teams }: {
   id: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
   teams: SquadOpponent[];
-  disabledValue: string;
 }) {
   return (
     <div className="field-group national-team-field">
       <label htmlFor={id}>{label}</label>
       <select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
-        {teams.map((team) => <option key={team.id} value={team.id} disabled={team.id === disabledValue}>{team.flag} {team.name}</option>)}
+        {teams.map((team) => <option key={team.id} value={team.id}>{team.flag} {team.name}</option>)}
       </select>
     </div>
   );

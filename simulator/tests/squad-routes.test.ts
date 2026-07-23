@@ -7,6 +7,7 @@ import { POST as postPreview } from "../app/api/squad/preview/route";
 import { positionCompatibility } from "../lib/game/compatibility";
 import { FORMATION_433 } from "../lib/game/formations";
 import { DEFAULT_HOME_SELECTION } from "../lib/game/sample-teams";
+import { nationalityFlag } from "../lib/squad/opponents";
 
 describe("Squad Builder APIs", () => {
   it("bootstraps a complete editable demo squad", async () => {
@@ -46,13 +47,13 @@ describe("Squad Builder APIs", () => {
       flag: string;
       syntheticPlayers: number;
       selection: typeof DEFAULT_HOME_SELECTION;
-      players: Array<{ playerId: number; nationalityName: string }>;
+      players: Array<{ playerId: number; nationalityName: string; shortName: string }>;
     }>;
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toContain("no-store");
-    expect(response.headers.get("X-Team-Catalog-Size")).toBe("48");
-    expect(payload).toHaveLength(48);
+    expect(response.headers.get("X-Team-Catalog-Size")).toBe(String(payload.length));
+    expect(payload).toHaveLength(35);
     expect(payload.map((team) => team.id)).toEqual(
       expect.arrayContaining(["canada-2026", "france-2026", "turkiye-2026"]),
     );
@@ -66,13 +67,19 @@ describe("Squad Builder APIs", () => {
       expect(new Set(ids).size).toBe(18);
       expect(opponent.players).toHaveLength(18);
       expect(opponent.flag.length).toBeGreaterThan(0);
-      expect(opponent.syntheticPlayers).toBeGreaterThanOrEqual(0);
+      expect(opponent.syntheticPlayers).toBe(0);
+      expect(opponent.players.some((player) => player.shortName.startsWith("Réserve"))).toBe(false);
       expect(
         opponent.players.every(
           (player) => player.nationalityName === opponent.nation,
         ),
       ).toBe(true);
     }
+  });
+
+  it("uses World Cup flags and a neutral flag outside the selected nations", () => {
+    expect(nationalityFlag("France")).toBe("🇫🇷");
+    expect(nationalityFlag("Italy")).toBe("🏳️");
   });
 
   it("generates a deterministic random squad with valid positions", async () => {

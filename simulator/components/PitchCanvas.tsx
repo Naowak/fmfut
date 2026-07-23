@@ -148,7 +148,6 @@ export function PitchCanvas({ replay, homeColor, awayColor, homeBadge = "●", a
       replay.events
         .filter((event) => event.t <= time)
         .filter(isInterestingEvent)
-        .slice(-18)
         .reverse(),
     [replay.events, time],
   );

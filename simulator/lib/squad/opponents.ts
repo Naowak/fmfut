@@ -72,6 +72,13 @@ const ROLES: Partial<Record<string, Role>> = {
 };
 const BENCH_POSITIONS: Position[] = ["GK", "CB", "LB", "RB", "CM", "LW", "ST"];
 
+export const NEUTRAL_NATIONALITY_FLAG = "🏳️";
+
+export function nationalityFlag(nation: string): string {
+  return WORLD_CUP_2026_TEAMS.find((team) => team.nation === nation)?.flag
+    ?? NEUTRAL_NATIONALITY_FLAG;
+}
+
 export function createOpponentCatalog(players: PlayerCard[]): SquadOpponent[] {
   return WORLD_CUP_2026_TEAMS.map((definition, teamIndex) => {
     const pool = players.filter((player) => player.nationalityName === definition.nation);
@@ -121,7 +128,7 @@ export function createOpponentCatalog(players: PlayerCard[]): SquadOpponent[] {
       players: selectedPlayers,
       syntheticPlayers: generated.length,
     };
-  });
+  }).filter((opponent) => opponent.syntheticPlayers === 0);
 }
 
 export function createInternationalTeamContext(players: PlayerCard[]): {

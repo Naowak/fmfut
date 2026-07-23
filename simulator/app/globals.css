@@ -1043,7 +1043,7 @@ h1 {
   border-color: #59b47a;
   box-shadow: 0 0 0 3px rgba(89, 180, 122, .13);
 }
-.squad-filter-row { display: grid; grid-template-columns: 1fr 92px; gap: 8px; }
+.squad-filter-row { display: grid; grid-template-columns: minmax(0, .78fr) minmax(112px, .22fr); gap: 8px; }
 .player-search-results { min-height: 0; padding: 9px; overflow: auto; }
 .squad-loading { padding: 16px 8px; }
 .player-search-card {
@@ -1169,6 +1169,32 @@ h1 {
   border-right: 2px solid rgba(231,255,237,.42);
   border-bottom: 78px solid transparent;
   border-left: 2px solid rgba(231,255,237,.42);
+}
+.squad-block-preview {
+  position: absolute;
+  z-index: 1;
+  left: 50%;
+  height: 54%;
+  transform: translate(-50%, -50%);
+  border: 2px dashed rgba(255, 174, 82, .82);
+  border-radius: 18px;
+  background: rgba(234, 112, 20, .08);
+  pointer-events: none;
+  transition: top 180ms ease, width 180ms ease;
+}
+.squad-block-preview span {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  padding: 2px 7px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  color: #fff8ef;
+  background: rgba(180, 76, 5, .92);
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: .08em;
+  text-transform: uppercase;
 }
 .squad-slot-wrap {
   position: absolute;
@@ -2059,7 +2085,7 @@ html[data-theme="light"] .squad-warnings .squad-ok {
   .squad-heatmap-pitch { max-width: 390px; margin-inline: auto; }
 }
 
-/* V0.14 — densité, plein écran et accessibilité */
+/* V0.13.1 — densité, plein écran et accessibilité */
 .match-team-status { min-height: 52px; margin: 8px 0 12px; padding: 9px 12px; }
 .match-team-status strong { line-height: 1; }
 .match-team-status span { line-height: 1.25; }
@@ -2076,8 +2102,9 @@ html[data-theme="light"] .squad-warnings .squad-ok {
 }
 
 .match-view-grid {
-  height: calc(100svh - 70px);
-  min-height: 620px;
+  height: max(420px, calc(100dvh - 70px));
+  max-height: 900px;
+  min-height: 0;
   align-items: stretch;
 }
 .pitch-column { display: grid; min-height: 0; place-items: center; }

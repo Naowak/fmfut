@@ -37,6 +37,54 @@ function expectFiniteTree(value: unknown): void {
 }
 
 describe("match engine public contract", () => {
+  it("allows a team to play against itself", () => {
+    const output = simulateMatch({
+      home: DEFAULT_HOME_SELECTION,
+      away: DEFAULT_HOME_SELECTION,
+      players,
+      seed: "mirror-match",
+      logicalSeconds: 60,
+      recordReplay: true,
+    });
+
+    expect(output.result.homeName).toBe(DEFAULT_HOME_SELECTION.name);
+    expect(output.result.awayName).toBe(DEFAULT_HOME_SELECTION.name);
+    expect(output.playerStats.home).toHaveLength(16);
+    expect(output.playerStats.away).toHaveLength(16);
+    expectFiniteTree(output);
+  });
+
+  it("applies block height and width to the simulated spatial structure", () => {
+    const averageShape = (blockHeight: "LOW" | "HIGH", width: "NARROW" | "WIDE") => {
+      const samples = Array.from({ length: 6 }, (_, index) => simulateMatch({
+        home: {
+          ...DEFAULT_HOME_SELECTION,
+          tactics: {
+            blockHeight,
+            width,
+            buildUp: DEFAULT_HOME_SELECTION.tactics?.buildUp ?? "BALANCED",
+            pressing: DEFAULT_HOME_SELECTION.tactics?.pressing ?? "BALANCED",
+          },
+        },
+        away: DEFAULT_AWAY_SELECTION,
+        players,
+        seed: `block-shape-${index}`,
+        logicalSeconds: 90,
+        recordSpatialAnalytics: true,
+      }).analytics!.home);
+      return {
+        center: samples.reduce((sum, item) => sum + item.averageBlockCenterProgress, 0) / samples.length,
+        width: samples.reduce((sum, item) => sum + item.averageBlockWidth, 0) / samples.length,
+      };
+    };
+    const lowNarrow = averageShape("LOW", "NARROW");
+    const highNarrow = averageShape("HIGH", "NARROW");
+    const lowWide = averageShape("LOW", "WIDE");
+
+    expect(highNarrow.center).toBeGreaterThan(lowNarrow.center);
+    expect(lowWide.width).toBeGreaterThan(lowNarrow.width);
+  });
+
   it("supports alternative formations and tactical instructions", () => {
     const output = simulateMatch({
       home: { ...DEFAULT_HOME_SELECTION, formationId: "4-2-3-1", tactics: { blockHeight: "HIGH", buildUp: "SHORT", pressing: "AGGRESSIVE", width: "NARROW" } },

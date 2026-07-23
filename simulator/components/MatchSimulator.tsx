@@ -81,8 +81,8 @@ export function MatchSimulator() {
     <section className="simulator-shell">
       <div className="card main-card">
         <div className="toolbar toolbar-v07">
-          <TeamSelect id="quick-home" label="Équipe 1" value={homeId} onChange={(value) => { setHomeId(value); setMatch(null); }} teams={teams} disabledValue={awayId} />
-          <TeamSelect id="quick-away" label="Équipe 2" value={awayId} onChange={(value) => { setAwayId(value); setMatch(null); }} teams={teams} disabledValue={homeId} />
+          <TeamSelect id="quick-home" label={home?.name ?? "Équipe"} value={homeId} onChange={(value) => { setHomeId(value); setMatch(null); }} teams={teams} />
+          <TeamSelect id="quick-away" label={away?.name ?? "Équipe"} value={awayId} onChange={(value) => { setAwayId(value); setMatch(null); }} teams={teams} />
 
           <div className="field-group">
             <label htmlFor="seed">Seed déterministe</label>
@@ -96,7 +96,7 @@ export function MatchSimulator() {
 
           <ColorSelect
             id="home-color"
-            label="Couleur équipe 1"
+            label={`Couleur ${home?.name ?? "équipe"}`}
             value={homeColor}
             onChange={setHomeColor}
             disabledValue={awayColor}
@@ -104,7 +104,7 @@ export function MatchSimulator() {
 
           <ColorSelect
             id="away-color"
-            label="Couleur équipe 2"
+            label={`Couleur ${away?.name ?? "équipe"}`}
             value={awayColor}
             onChange={setAwayColor}
             disabledValue={homeColor}
@@ -114,7 +114,7 @@ export function MatchSimulator() {
             type="button"
             className="primary-button"
             onClick={runSimulation}
-            disabled={loading || !home || !away || homeId === awayId}
+            disabled={loading || !home || !away}
           >
             {loading ? "Simulation…" : "▶ Simuler le match"}
           </button>
@@ -270,21 +270,19 @@ function TeamSelect({
   value,
   onChange,
   teams,
-  disabledValue,
 }: {
   id: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
   teams: SquadOpponent[];
-  disabledValue: string;
 }) {
   return (
     <div className="field-group quick-team-field">
       <label htmlFor={id}>{label}</label>
       <select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
         {teams.map((team) => (
-          <option key={team.id} value={team.id} disabled={team.id === disabledValue}>
+          <option key={team.id} value={team.id}>
             {team.flag} {team.name}
           </option>
         ))}

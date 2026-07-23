@@ -31,6 +31,10 @@ import {
 } from "@/lib/squad/client-storage";
 import { STRATEGY_EMBLEMS, TEAM_EMBLEMS } from "@/lib/squad/emblems";
 import {
+  nationalityFlag,
+  WORLD_CUP_2026_TEAMS,
+} from "@/lib/squad/opponents";
+import {
   addPlayerToBench,
   allDraftPlayers,
   assignPlayerToSlot,
@@ -52,6 +56,8 @@ const STATS = ["speed", "shooting", "passing", "physical", "technique", "intelli
 const STAT_LABELS: Record<(typeof STATS)[number], string> = {
   speed: "VIT", shooting: "TIR", passing: "PAS", physical: "PHY", technique: "TEC", intelligence: "INT",
 };
+const WORLD_CUP_NATIONS = [...WORLD_CUP_2026_TEAMS]
+  .sort((left, right) => left.name.localeCompare(right.name, "fr"));
 
 type SearchPayload = {
   items: PlayerCard[];
@@ -298,7 +304,10 @@ export function SquadBuilder() {
             </select>
             <input aria-label="Note générale minimum" type="number" min={1} max={100} placeholder="Note min" value={minOverall} onChange={(event) => { setMinOverall(event.target.value); setPage(1); }} />
           </div>
-          <input className="text-input" aria-label="Filtrer par nationalité" placeholder="Nationalité…" value={nation} onChange={(event) => { setNation(event.target.value); setPage(1); }} />
+          <select aria-label="Filtrer par nationalité" value={nation} onChange={(event) => { setNation(event.target.value); setPage(1); }}>
+            <option value="">Toutes les nationalités</option>
+            {WORLD_CUP_NATIONS.map((team) => <option key={team.id} value={team.nation}>{team.flag} {team.name.replace(" 2026", "")}</option>)}
+          </select>
         </div>
         <div className="player-search-results" aria-busy={searchLoading}>
           {searchLoading ? <p className="muted squad-loading">Recherche…</p> : search.items.map((player) => (
@@ -359,15 +368,30 @@ export function SquadBuilder() {
 
         <section className="squad-pitch" aria-label={`Terrain ${FORMATION_LABELS[draft.formationId]}`}>
           <div className="squad-pitch-markings" />
+          <div
+            className="squad-block-preview"
+            style={{
+              width: draft.tactics.width === "NARROW" ? "52%" : draft.tactics.width === "WIDE" ? "84%" : "68%",
+              top: draft.tactics.blockHeight === "HIGH" ? "39%" : draft.tactics.blockHeight === "LOW" ? "61%" : "50%",
+            }}
+          >
+            <span>Bloc</span>
+          </div>
           {formation.map((slot) => {
             const slotId = slot.id as SquadSlotId;
             const player = draft.starters[slotId];
             const slotDiagnostic = diagnostics.slots.find((item) => item.slotId === slotId);
+            const heightShift = slot.position === "GK"
+              ? 0
+              : draft.tactics.blockHeight === "HIGH" ? 0.055 : draft.tactics.blockHeight === "LOW" ? -0.055 : 0;
+            const widthScale = draft.tactics.width === "NARROW" ? 0.82 : draft.tactics.width === "WIDE" ? 1.18 : 1;
+            const previewX = Math.max(0.03, Math.min(0.97, slot.anchor.x + heightShift));
+            const previewY = Math.max(0.04, Math.min(0.96, 0.5 + (slot.anchor.y - 0.5) * widthScale));
             return (
               <div
                 key={slot.id}
                 className="squad-slot-wrap"
-                style={{ left: `${slot.anchor.y * 100}%`, top: `${(1 - slot.anchor.x) * 100}%` }}
+                style={{ left: `${previewY * 100}%`, top: `${(1 - previewX) * 100}%` }}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => { event.preventDefault(); handleDrop(slotId, Number(event.dataTransfer.getData("text/player-id"))); }}
               >
@@ -418,7 +442,7 @@ export function SquadBuilder() {
                   onDragStart={(event) => event.dataTransfer.setData("text/player-id", String(player.playerId))}
                 >
                   <button className="bench-player-main" type="button" aria-label={`Placer ${player.shortName} en ${slotLabel(selectedSlot)}`} onClick={() => placeInSlot(player)}>
-                    <span className="player-overall">{player.overall}</span><span className="bench-player-identity"><strong>{player.shortName}</strong><span>{positionShortLabel(player.primaryPosition)} · {nationalityLabel(player.nationalityName)}</span></span>
+                    <span className="player-overall">{player.overall}</span><span className="bench-player-identity"><strong>{player.shortName}</strong><span>{positionShortLabel(player.primaryPosition)} · {nationalityFlag(player.nationalityName)} {nationalityLabel(player.nationalityName)}</span></span>
                   </button>
                   <button type="button" aria-label={`Retirer ${player.shortName}`} onClick={() => updateDraft((current) => removePlayer(current, player.playerId))}>×</button>
                 </div>
@@ -476,7 +500,7 @@ function PlayerSearchCard({ player, selected, inSquad, targetSlot, onSelect, onP
 }) {
   return (
     <article className="player-search-card" data-selected={selected} draggable onDragStart={(event) => event.dataTransfer.setData("text/player-id", String(player.playerId))} onClick={onSelect}>
-      <div className="player-card-heading"><span className="player-overall">{player.overall}</span><div><strong>{player.shortName}</strong><span>{positionShortLabel(player.primaryPosition)} · {nationalityLabel(player.nationalityName)}</span></div>{inSquad && <span className="in-squad-badge">RETENU</span>}</div>
+      <div className="player-card-heading"><span className="player-overall">{player.overall}</span><div><strong>{player.shortName}</strong><span>{positionShortLabel(player.primaryPosition)} · {nationalityFlag(player.nationalityName)} {nationalityLabel(player.nationalityName)}</span></div>{inSquad && <span className="in-squad-badge">RETENU</span>}</div>
       <div className="player-mini-stats">{STATS.map((stat) => <span key={stat}><b>{player.stats[stat]}</b>{STAT_LABELS[stat]}</span>)}</div>
       <div className="player-card-actions"><button type="button" onClick={(event) => { event.stopPropagation(); onPlace(); }}>Placer en {slotLabel(targetSlot)}</button><button type="button" onClick={(event) => { event.stopPropagation(); onBench(); }}>Banc</button></div>
     </article>

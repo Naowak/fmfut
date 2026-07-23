@@ -135,11 +135,6 @@ export function SquadMatchLauncher() {
                 <strong>Remplaçants</strong>
                 <span>{opponent.selection.bench.map((id) => opponent.players.find((player) => player.playerId === id)?.shortName ?? "—").join(" · ")}</span>
               </div>
-              {opponent.syntheticPlayers > 0 && (
-                <p className="muted opponent-note">
-                  {opponent.syntheticPlayers} réserviste(s) généré(s) pour compléter le dataset.
-                </p>
-              )}
             </>
           )}
           <button className="primary-button match-launch-button" type="button" disabled={!diagnostics?.complete || !opponent || matchLoading} onClick={launchMatch}>

@@ -261,15 +261,15 @@ function SquadSpatialExplorer({ result }: { result: SquadPreviewResponse }) {
     <section className="card squad-test-section squad-spatial-section">
       <div className="squad-spatial-controls">
         <div className="segmented-control" aria-label="Équipe observée">
-          <button type="button" aria-pressed={side === "team"} onClick={() => { setSide("team"); setPlayerId("team"); }}>{result.teamName}</button>
-          <button type="button" aria-pressed={side === "opponent"} onClick={() => { setSide("opponent"); setPlayerId("team"); }}>{result.opponentName}</button>
+          <button type="button" aria-pressed={side === "team"} onClick={() => { setSide("team"); setPlayerId("team"); setComparePlayerId(""); }}>{result.teamName}</button>
+          <button type="button" aria-pressed={side === "opponent"} onClick={() => { setSide("opponent"); setPlayerId("team"); setComparePlayerId(""); }}>{result.opponentName}</button>
         </div>
-        <label>Observation<select value={playerId} onChange={(event) => setPlayerId(event.target.value)}>
+        <label>Observation<select value={playerId} onChange={(event) => { setPlayerId(event.target.value); setComparePlayerId(""); }}>
           <option value="team">Équipe complète</option>
           {players.map((player) => <option key={player.playerId} value={player.playerId}>{player.playerName}</option>)}
         </select></label>
         <label>Période / phase<select value={slice} onChange={(event) => setSlice(event.target.value as SpatialSliceKey)}><option value="ALL">Match complet</option><option value="FIRST_HALF">Première période</option><option value="SECOND_HALF">Seconde période</option><option value="IN_POSSESSION">Avec ballon</option><option value="OUT_OF_POSSESSION">Sans ballon</option></select></label>
-        <label>Comparer un joueur<select value={comparePlayerId} disabled={playerId === "team"} onChange={(event) => setComparePlayerId(event.target.value)}><option value="">Aucun</option>{players.filter((player) => String(player.playerId) !== playerId).map((player) => <option key={player.playerId} value={player.playerId}>{player.playerName}</option>)}</select></label>
+        {playerId !== "team" && <label>Comparer un joueur<select value={comparePlayerId} onChange={(event) => setComparePlayerId(event.target.value)}><option value="">Aucun</option>{players.filter((player) => String(player.playerId) !== playerId).map((player) => <option key={player.playerId} value={player.playerId}>{player.playerName}</option>)}</select></label>}
       </div>
       <div className="squad-spatial-layout">
         <div className="squad-heatmap-pitch" style={{ gridTemplateColumns: `repeat(${result.spatial!.columns}, 1fr)`, gridTemplateRows: `repeat(${result.spatial!.rows}, 1fr)` }} aria-label={`Occupation moyenne — ${selectedPlayer?.playerName ?? name}`}>
